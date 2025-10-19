@@ -1,0 +1,3 @@
+[submodule "CommonCore"]
+	path = CommonCore
+	url = https://github.com/kijin-Kim/CommonCore.git

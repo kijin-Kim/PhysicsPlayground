@@ -1,0 +1,56 @@
+Language: Cpp
+BasedOnStyle: LLVM
+
+# 탭 기반 (UE 스타일)
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+
+
+# Allman 브레이스
+BreakBeforeBraces: Allman
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: true
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  AfterLambda: true       # 람다도 Allman
+  BeforeElse: true
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+# 생성자 initializer list → , 앞 개행
+BreakConstructorInitializers: BeforeComma
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+
+# 연산자 → 항상 줄 앞 개행 (UE 원칙)
+BreakBeforeBinaryOperators: All
+BreakBeforeTernaryOperators: true
+
+# 유니폼 이니셜라이제이션도 Allman 스타일 강제
+Cpp11BracedListStyle: true
+
+# 람다 관련
+LambdaBodyIndentation: Signature
+AllowShortLambdasOnASingleLine: None   # 짧아도 Allman 강제
+
+# 함수/파라미터 줄바꿈
+BinPackArguments: false
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# 기타
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+AlignTrailingComments: true
+ColumnLimit: 0           # UE는 보통 길이 제한 없음
+SortIncludes: false
+NamespaceIndentation: All
+PointerAlignment: Left
+
