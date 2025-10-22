@@ -10,10 +10,8 @@ Object::Object(std::unique_ptr<IPrimitive> mesh)
 	, rigidBody_()
 	, position_(0.0f, 0.0f)
 	, rotation_(0.0f)
-	, scale_(1.0f, 1.0f)
-
+	, scale_(100.0f, 100.0f)
 	, transform_(1.0f)
-
 {
 }
 
@@ -23,9 +21,6 @@ void Object::OnInit()
 	{
 		mesh_->UploadData();
 	}
-	position_ = glm::vec2(400.0f, 600.0f);
-	scale_ = glm::vec2(50.0f, 50.0f);
-	rigidBody_.AddForce(glm::vec2(200.0f, 100.0f));
 }
 
 void Object::OnUpdate(float deltaTime)
@@ -34,7 +29,6 @@ void Object::OnUpdate(float deltaTime)
 	transform_ = glm::translate(glm::mat4(1.0f), glm::vec3(position_, 0.0f));
 	transform_ = glm::rotate(transform_, rotation_, glm::vec3(0.0f, 0.0f, 1.0f));
 	transform_ = glm::scale(transform_, glm::vec3(scale_, 1.0f));
-
 }
 
 void Object::OnRender(Renderer& renderer)

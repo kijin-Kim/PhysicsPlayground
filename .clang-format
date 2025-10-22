@@ -18,7 +18,7 @@ BraceWrapping:
   AfterStruct: true
   AfterUnion: true
   AfterExternBlock: true
-  AfterLambda: true       # 람다도 Allman
+#  AfterLambda: true
   BeforeElse: true
   IndentBraces: false
   SplitEmptyFunction: true
