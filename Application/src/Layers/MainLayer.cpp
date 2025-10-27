@@ -1,15 +1,11 @@
 #include "MainLayer.h"
 
 #include "GLFW/glfw3.h"
-
-#include <memory>
+#include "Renderer/Shapes.h"
 
 #include "Physics/Object.h"
+#include "Renderer/Renderer.h"
 
-#include "Renderer/Primitives/CircleMesh.h"
-#include "Renderer/Primitives/PrimitiveVertex.h"
-#include "Renderer/Primitives/RectangleMesh.h"
-#include "Renderer/Primitives/TriangleMesh.h"
 
 #include "glm/ext/matrix_transform.hpp"
 
@@ -18,6 +14,31 @@
 constexpr glm::vec4 color1 = glm::vec4(1.0f, 0.5f, 0.2f, 1.0f);
 constexpr glm::vec4 color2 = glm::vec4(0.2f, 0.5f, 1.0f, 1.0f);
 constexpr glm::vec4 color3 = glm::vec4(0.5f, 0.2f, 0.2f, 1.0f);
+constexpr glm::vec4 color4 = glm::vec4(0.71f, 0.49f, 0.72f, 1.0f);
+
+void NormalizeToCenteroid(std::vector<glm::vec2>& outPoints)
+{
+	glm::vec2 centroid(0.0f);
+	float area = 0.0f;
+	for (int i = 0; i < outPoints.size(); ++i)
+	{
+		int j = (i + 1) % outPoints.size();
+
+		// 벡터 외적을 이용한 다각형의 면적 계산 누적
+		const float cross = outPoints[i].x * outPoints[j].y - outPoints[j].x * outPoints[i].y;
+		area += cross * 0.5f;
+
+		// 무게중심 계산 누적
+		const glm::vec2 weight = (outPoints[i] + outPoints[j]);
+		centroid += weight * cross;
+	}
+
+	centroid /= (6.0f * area);
+	for (glm::vec2& point : outPoints)
+	{
+		point -= centroid;
+	}
+}
 
 struct Edge
 {
@@ -197,55 +218,41 @@ bool GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& ver
 	return false;
 }
 
-Manifold Collide(const Object& obj1, const Object& obj2)
+Manifold Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
 {
-
-	glm::mat4 transform1 = obj1.GetTransform();
-	const std::array<float, 8> verts1 = PrimitiveVertex::RectangleVertices;
-	std::vector<glm::vec2> transformedVerts1;
-	for (size_t i = 0; i < verts1.size(); i += 2)
-	{
-		glm::vec4 vertex = transform1 * glm::vec4(verts1[i], verts1[i + 1], 0.0f, 1.0f);
-		transformedVerts1.emplace_back(vertex.x, vertex.y);
-	}
-
-	glm::mat4 transform2 = obj2.GetTransform();
-	const std::array<float, 8> verts2 = PrimitiveVertex::RectangleVertices;
-	std::vector<glm::vec2> transformedVerts2;
-	for (size_t i = 0; i < verts2.size(); i += 2)
-	{
-		glm::vec4 vertex = transform2 * glm::vec4(verts2[i], verts2[i + 1], 0.0f, 1.0f);
-		transformedVerts2.emplace_back(vertex.x, vertex.y);
-	}
-
 	std::vector<glm::vec2> simplex;
 	Manifold manifold;
 	manifold.bHit = false;
-	if (!GJK(transformedVerts1, transformedVerts2, simplex))
+	if (!GJK(verts1, verts2, simplex))
 	{
 		return manifold;
 	}
 
-	manifold = EPA(simplex, transformedVerts1, transformedVerts2);
+	manifold = EPA(simplex, verts1, verts2);
 	return manifold;
-}
-
-MainLayer::MainLayer()
-{
-	Object& o1 = objects_.emplace_back(std::make_unique<RectangleMesh>(color1, DrawMode::Lines));
-	o1.GetRigidbody().SetMass(0.0f);
-	o1.SetPosition(glm::vec2(-30.0f, -30.0f));
-	Object& o2 = objects_.emplace_back(std::make_unique<RectangleMesh>(color2, DrawMode::Lines));
-	o2.GetRigidbody().SetMass(0.0f);
-	o2.SetPosition(glm::vec2(30.0f, 30.0f));
 }
 
 void MainLayer::OnInit()
 {
-	for (Object& object : objects_)
-	{
-		object.OnInit();
-	}
+	Object& o1 = objects_.emplace_back();
+	o1.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
+	o1.GetShape()->SetColor(color1);
+	o1.GetRigidbody().SetMass(0.0f);
+	o1.SetPosition(glm::vec2(-30.0f, -30.0f));
+
+	std::vector<glm::vec2> polygonVertices = {
+		glm::vec2(50.0f, 70.0f),
+		glm::vec2(70.0f, 30.0f),
+		glm::vec2(100.0f, 20.0f),
+		glm::vec2(120.0f, 70.0f)};
+	NormalizeToCenteroid(polygonVertices);
+
+	Object& o2 = objects_.emplace_back();
+	//o2.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
+	o2.SetShape(std::make_unique<ConvexShape>(polygonVertices));
+	o2.GetShape()->SetColor(color4);
+	o2.GetRigidbody().SetMass(0.0f);
+	o2.SetPosition(glm::vec2(30.0f, 30.0f));
 }
 
 void MainLayer::OnUpdate(float deltaTime)
@@ -255,29 +262,40 @@ void MainLayer::OnUpdate(float deltaTime)
 		object.OnUpdate(deltaTime);
 	}
 
-	// Object& o2 = objects_[1];
-	// glm::vec2 position = o2.GetPosition();
-	// position.x += cos(static_cast<float>(glfwGetTime())) * 50.0f * deltaTime;
-	// o2.SetPosition(position);
-	// float rotation = o2.GetRotation();
-	// rotation += glm::radians(90.0f) * deltaTime;
-	// o2.SetRotation(rotation);
+	Object& o2 = objects_[1];
+	glm::vec2 position = o2.GetPosition();
+	position.x += cos(static_cast<float>(glfwGetTime())) * 50.0f * deltaTime;
+	o2.SetPosition(position);
+	float rotation = o2.GetRotation();
+	rotation += glm::radians(90.0f) * deltaTime;
+	o2.SetRotation(rotation);
 
 	for (size_t i = 0; i < objects_.size(); ++i)
 	{
 		for (size_t j = i + 1; j < objects_.size(); ++j)
 		{
-			Manifold manifold = Collide(objects_[i], objects_[j]);
+			std::vector<glm::vec2> vert1 = objects_[i].GetShape()->GetVertices();
+			std::vector<glm::vec2> vert2 = objects_[j].GetShape()->GetVertices();
+			for (glm::vec2& point : vert1)
+			{
+				point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+			}
+			for (glm::vec2& point : vert2)
+			{
+				point = objects_[j].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+			}
+
+			Manifold manifold = Collide(vert1, vert2);
 			if (manifold.bHit)
 			{
-				objects_[i].GetMesh()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-				objects_[j].GetMesh()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+				objects_[i].GetShape()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+				objects_[j].GetShape()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
 				std::cout << manifold.Penetration << std::endl;
 			}
 			else
 			{
-				objects_[i].GetMesh()->SetColor(color1);
-				objects_[j].GetMesh()->SetColor(color2);
+				objects_[i].GetShape()->SetColor(color1);
+				objects_[j].GetShape()->SetColor(color2);
 			}
 		}
 	}
@@ -285,8 +303,12 @@ void MainLayer::OnUpdate(float deltaTime)
 
 void MainLayer::OnRender(Renderer& renderer)
 {
+	renderer.BeginScene();
+
 	for (Object& object : objects_)
 	{
 		object.OnRender(renderer);
 	}
+	renderer.EndScene();
+
 }
