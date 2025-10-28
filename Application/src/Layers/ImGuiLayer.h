@@ -5,8 +5,10 @@
 class ImGuiLayer : public ILayer
 {
 public:
+	ImGuiLayer(EventBus& eventBus);
 	virtual void OnInit() override;
 	virtual void OnUpdate(float deltaTime) override;
 	virtual void OnRender(Renderer& renderer) override;
 	virtual void OnDestroy() override;
+
 };

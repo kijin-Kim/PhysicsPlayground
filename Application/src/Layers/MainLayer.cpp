@@ -11,6 +11,10 @@
 
 #include <iostream>
 
+#include "Events.h"
+
+#include "Core/EventBus.h"
+
 constexpr glm::vec4 color1 = glm::vec4(1.0f, 0.5f, 0.2f, 1.0f);
 constexpr glm::vec4 color2 = glm::vec4(0.2f, 0.5f, 1.0f, 1.0f);
 constexpr glm::vec4 color3 = glm::vec4(0.5f, 0.2f, 0.2f, 1.0f);
@@ -54,6 +58,48 @@ struct Manifold
 	glm::vec2 Normal;
 	float Penetration;
 };
+
+void ResolveCollision(Object& obj1, Object& obj2, const Manifold& manifold)
+{
+	Rigidbody& body1 = obj1.GetRigidbody();
+	Rigidbody& body2 = obj2.GetRigidbody();
+	const float totalInvMass = body1.GetInvMass() + body2.GetInvMass();
+	if (totalInvMass <= 0.0f)
+	{
+		return;
+	}
+
+	const glm::vec2 relativeVelocity = body2.GetVelocity() - body1.GetVelocity();
+	const float velocityAlongNormal = glm::dot(relativeVelocity, manifold.Normal);
+	if (velocityAlongNormal > 0)
+	{
+		return;
+	}
+
+	const float e = 1.0f; // 반발 계수
+	const float j = -(1.0f + e) * velocityAlongNormal / totalInvMass;
+	const glm::vec2 impulse = j * manifold.Normal;
+
+	body1.ApplyImpulse(-impulse);
+	body2.ApplyImpulse(impulse);
+
+	// Positional correction
+	const float percent = 0.8f; // 보정 비율 (0~1)
+	const float slop = 0.01f;   // 허용 오차
+	const float totalSeparation = std::max(manifold.Penetration - slop, 0.0f) * percent;
+	glm::vec2 correction = totalSeparation / totalInvMass * manifold.Normal;
+
+	if (body1.GetInvMass() > 0)
+	{
+		obj1.SetPosition(obj1.GetPosition() - correction * body1.GetInvMass());
+	}
+
+	if (body2.GetInvMass() > 0)
+	{
+		obj2.SetPosition(obj2.GetPosition() + correction * body2.GetInvMass());
+	}
+
+}
 
 Edge FindClosestEdge(const std::vector<glm::vec2>& simplex)
 {
@@ -198,17 +244,17 @@ Manifold EPA(const std::vector<glm::vec2>& simplex, const std::vector<glm::vec2>
 bool GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<glm::vec2>& outSimplex)
 {
 	glm::vec2 direction(1.0f, 0.0f);
-	glm::vec2 point = Support(verts1, verts2, direction);
-	outSimplex.push_back(point);
-	direction = -point;
+	glm::vec2 supportPoint = Support(verts1, verts2, direction);
+	outSimplex.push_back(supportPoint);
+	direction = -supportPoint;
 	for (int i = 0; i < 100; ++i)
 	{
-		point = Support(verts1, verts2, direction);
-		if (glm::dot(point, direction) <= 0)
+		supportPoint = Support(verts1, verts2, direction);
+		if (glm::dot(supportPoint, direction) <= 0)
 		{
 			return false;
 		}
-		outSimplex.push_back(point);
+		outSimplex.push_back(supportPoint);
 		if (DoSimplex(outSimplex, direction))
 		{
 			return true;
@@ -232,6 +278,20 @@ Manifold Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::ve
 	return manifold;
 }
 
+MainLayer::MainLayer(EventBus& eventBus)
+	: ILayer(eventBus)
+{
+	eventBus_.Subscribe<ToggleUpdateEvent>([this](const ToggleUpdateEvent& e)
+	{
+		bShouldPauseUpdate = !bShouldPauseUpdate;
+	});
+
+	eventBus_.Subscribe<StepEvent>([this](const StepEvent& e)
+	{
+		Step(e.DeltaTime);
+	});
+}
+
 void MainLayer::OnInit()
 {
 	Object& o1 = objects_.emplace_back();
@@ -251,25 +311,75 @@ void MainLayer::OnInit()
 	//o2.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
 	o2.SetShape(std::make_unique<ConvexShape>(polygonVertices));
 	o2.GetShape()->SetColor(color4);
-	o2.GetRigidbody().SetMass(0.0f);
-	o2.SetPosition(glm::vec2(30.0f, 30.0f));
+	o2.GetRigidbody().SetMass(1.0f);
+	o2.SetPosition(glm::vec2(30.0f, 80.0f));
+
+	Object& floor = objects_.emplace_back();
+	floor.SetShape(std::make_unique<RectangleShape>(glm::vec2(800.0f, 50.0f)));
+	floor.GetShape()->SetColor(color1);
+	floor.GetRigidbody().SetMass(0.0f);
+	floor.SetPosition(glm::vec2(0.0f, -300.0f));
+
+	Object& leftWall = objects_.emplace_back();
+	leftWall.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 600.0f)));
+	leftWall.GetShape()->SetColor(color1);
+	leftWall.GetRigidbody().SetMass(0.0f);
+	leftWall.SetPosition(glm::vec2(-400.0f, 0.0f));
+
+	Object& rightWall = objects_.emplace_back();
+	rightWall.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 600.0f)));
+	rightWall.GetShape()->SetColor(color1);
+	rightWall.GetRigidbody().SetMass(0.0f);
+	rightWall.SetPosition(glm::vec2(400.0f, 0.0f));
+
+	Object& ceiling = objects_.emplace_back();
+	ceiling.SetShape(std::make_unique<RectangleShape>(glm::vec2(800.0f, 50.0f)));
+	ceiling.GetShape()->SetColor(color1);
+	ceiling.GetRigidbody().SetMass(0.0f);
+	ceiling.SetPosition(glm::vec2(0.0f, 300.0f));
+
+
+	// random circles
+	for (int i = 0; i < 30; ++i)
+	{
+		Object& circleObj = objects_.emplace_back();
+		circleObj.SetShape(std::make_unique<CircleShape>(15.0f));
+		circleObj.GetShape()->SetColor(color2);
+		circleObj.GetRigidbody().SetMass(1.0f);
+		float x = static_cast<float>(rand() % 700 - 350);
+		float y = static_cast<float>(rand() % 500 - 250);
+		circleObj.SetPosition(glm::vec2(x, y));
+	}
 }
 
 void MainLayer::OnUpdate(float deltaTime)
+{
+	if (!bShouldPauseUpdate)
+	{
+		Step(deltaTime);
+	}
+}
+
+void MainLayer::OnRender(Renderer& renderer)
+{
+	renderer.BeginScene();
+
+	for (Object& object : objects_)
+	{
+		object.OnRender(renderer);
+	}
+	renderer.EndScene();
+
+}
+
+void MainLayer::Step(float deltaTime)
 {
 	for (Object& object : objects_)
 	{
 		object.OnUpdate(deltaTime);
 	}
 
-	Object& o2 = objects_[1];
-	glm::vec2 position = o2.GetPosition();
-	position.x += cos(static_cast<float>(glfwGetTime())) * 50.0f * deltaTime;
-	o2.SetPosition(position);
-	float rotation = o2.GetRotation();
-	rotation += glm::radians(90.0f) * deltaTime;
-	o2.SetRotation(rotation);
-
+	std::vector<bool> collidedObjects(objects_.size());
 	for (size_t i = 0; i < objects_.size(); ++i)
 	{
 		for (size_t j = i + 1; j < objects_.size(); ++j)
@@ -288,27 +398,22 @@ void MainLayer::OnUpdate(float deltaTime)
 			Manifold manifold = Collide(vert1, vert2);
 			if (manifold.bHit)
 			{
-				objects_[i].GetShape()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-				objects_[j].GetShape()->SetColor(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-				std::cout << manifold.Penetration << std::endl;
-			}
-			else
-			{
-				objects_[i].GetShape()->SetColor(color1);
-				objects_[j].GetShape()->SetColor(color2);
+				ResolveCollision(objects_[i], objects_[j], manifold);
+				collidedObjects[i] = true;
+				collidedObjects[j] = true;
 			}
 		}
 	}
-}
 
-void MainLayer::OnRender(Renderer& renderer)
-{
-	renderer.BeginScene();
-
-	for (Object& object : objects_)
+	for (size_t i = 0; i < objects_.size(); ++i)
 	{
-		object.OnRender(renderer);
+		if (collidedObjects[i])
+		{
+			objects_[i].GetShape()->SetColor(color3);
+		}
+		else
+		{
+			objects_[i].GetShape()->SetColor(color2);
+		}
 	}
-	renderer.EndScene();
-
 }

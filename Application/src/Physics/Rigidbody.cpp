@@ -5,6 +5,7 @@ Rigidbody::Rigidbody()
 	, accumForce_(0.0f, 0.0f)
 	, invMass_(1.0f)
 	, damping_(0.98f)
+	, gravityScale_(1.0f)
 {
 }
 
@@ -16,7 +17,7 @@ void Rigidbody::Integrate(float deltaTime, glm::vec2& outPosition)
 	}
 
 	constexpr float gravityConstant = 100.0f;
-	AddForce({0.0f, -gravityConstant * 1.0f / invMass_});
+	AddForce({0.0f, -gravityConstant * 1.0f / invMass_ * gravityScale_});
 	const glm::vec2 acceleration = accumForce_ * invMass_;
 	velocity_ += acceleration * deltaTime;
 	velocity_ *= pow(damping_, deltaTime);

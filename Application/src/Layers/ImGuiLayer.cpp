@@ -1,10 +1,18 @@
 #include "ImGuiLayer.h"
 
+#include "Events.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include "Core/EventBus.h"
+
 #include "GLFW/glfw3.h"
+
+ImGuiLayer::ImGuiLayer(EventBus& eventBus)
+	: ILayer(eventBus)
+{
+}
 
 void ImGuiLayer::OnInit()
 {
@@ -22,9 +30,19 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	ImGui::NewFrame();
 
 	ImGui::Begin("Hello from ImGuiLayer");
-	ImGui::Text("This is ImGui integrated as a layer!");
+	ImGui::Text("FrameRate: %d", static_cast<int>(ImGui::GetIO().Framerate));
+	if (ImGui::Button("Toggle Update", ImVec2(-1.0f, 0.0f)))
+	{
+		ToggleUpdateEvent event;
+		eventBus_.Publish(event);
+	}
+	if (ImGui::Button("Step", ImVec2(-1.0f, 0.0f)))
+	{
+		StepEvent event;
+		event.DeltaTime = deltaTime;
+		eventBus_.Publish(event);
+	}
 	ImGui::End();
-
 }
 
 void ImGuiLayer::OnRender(Renderer& renderer)
