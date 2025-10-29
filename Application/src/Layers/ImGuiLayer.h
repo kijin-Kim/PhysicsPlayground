@@ -1,4 +1,6 @@
 #pragma once
+#include "Events.h"
+
 #include "Core/Layers/Layer.h"
 
 
@@ -11,4 +13,8 @@ public:
 	virtual void OnRender(Renderer& renderer) override;
 	virtual void OnDestroy() override;
 
+private:
+	bool bShouldPauseUpdate_ = false;
+	BroadPhase::Type currentBroadPhaseType_;
+	float currentGridCellSize_;
 };

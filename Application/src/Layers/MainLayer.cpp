@@ -10,15 +10,39 @@
 #include "glm/ext/matrix_transform.hpp"
 
 #include <iostream>
-
-#include "Events.h"
+#include <unordered_set>
 
 #include "Core/EventBus.h"
+#include "GLM/gtx/hash.hpp"
+
+#include "glm/gtx/integer.hpp"
 
 constexpr glm::vec4 color1 = glm::vec4(1.0f, 0.5f, 0.2f, 1.0f);
 constexpr glm::vec4 color2 = glm::vec4(0.2f, 0.5f, 1.0f, 1.0f);
 constexpr glm::vec4 color3 = glm::vec4(0.5f, 0.2f, 0.2f, 1.0f);
 constexpr glm::vec4 color4 = glm::vec4(0.71f, 0.49f, 0.72f, 1.0f);
+
+struct AABB
+{
+	glm::vec2 Min;
+	glm::vec2 Max;
+};
+
+AABB ComputeAABB(const std::vector<glm::vec2>& points)
+{
+	AABB aabb;
+	aabb.Min = glm::vec2(FLT_MAX);
+	aabb.Max = glm::vec2(-FLT_MAX);
+
+	for (const glm::vec2& point : points)
+	{
+		aabb.Min = glm::min(aabb.Min, point);
+		aabb.Max = glm::max(aabb.Max, point);
+	}
+
+	return aabb;
+}
+
 
 void NormalizeToCenteroid(std::vector<glm::vec2>& outPoints)
 {
@@ -281,14 +305,24 @@ Manifold Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::ve
 MainLayer::MainLayer(EventBus& eventBus)
 	: ILayer(eventBus)
 {
-	eventBus_.Subscribe<ToggleUpdateEvent>([this](const ToggleUpdateEvent& e)
+	eventBus_.Subscribe<PauseUpdateEvent>([this](const PauseUpdateEvent& e)
 	{
-		bShouldPauseUpdate = !bShouldPauseUpdate;
+		bShouldPauseUpdate = e.bPaused;
 	});
 
 	eventBus_.Subscribe<StepEvent>([this](const StepEvent& e)
 	{
 		Step(e.DeltaTime);
+	});
+
+	eventBus_.Subscribe<ChangeBroadPhaseAlgorithmEvent>([this](const ChangeBroadPhaseAlgorithmEvent& e)
+	{
+		broadPhaseAlgorithm_ = e.NewAlgorithm;
+	});
+
+	eventBus_.Subscribe<GridCellSizeChangedEvent>([this](const GridCellSizeChangedEvent& e)
+	{
+		cellSize = e.NewCellSize;
 	});
 }
 
@@ -338,7 +372,6 @@ void MainLayer::OnInit()
 	ceiling.GetRigidbody().SetMass(0.0f);
 	ceiling.SetPosition(glm::vec2(0.0f, 300.0f));
 
-
 	// random circles
 	for (int i = 0; i < 30; ++i)
 	{
@@ -363,11 +396,23 @@ void MainLayer::OnUpdate(float deltaTime)
 void MainLayer::OnRender(Renderer& renderer)
 {
 	renderer.BeginScene();
-
 	for (Object& object : objects_)
 	{
 		object.OnRender(renderer);
 	}
+
+	if (broadPhaseAlgorithm_ == BroadPhase::Type::Grid)
+	{
+		for (float x = -400.0f; x <= 400.0f; x += cellSize)
+		{
+			renderer.DrawRectangle(glm::vec2(x, 0.0f), 0.0f, glm::vec2(1.0f, 600.0f), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+		}
+		for (float y = -300.0f; y <= 300.0f; y += cellSize)
+		{
+			renderer.DrawRectangle(glm::vec2(0.0f, y), 0.0f, glm::vec2(800.0f, 1.0f), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+		}
+	}
+
 	renderer.EndScene();
 
 }
@@ -379,29 +424,41 @@ void MainLayer::Step(float deltaTime)
 		object.OnUpdate(deltaTime);
 	}
 
-	std::vector<bool> collidedObjects(objects_.size());
-	for (size_t i = 0; i < objects_.size(); ++i)
+	std::vector<std::pair<size_t, size_t> > potentialCollisions;
+	switch (broadPhaseAlgorithm_)
 	{
-		for (size_t j = i + 1; j < objects_.size(); ++j)
-		{
-			std::vector<glm::vec2> vert1 = objects_[i].GetShape()->GetVertices();
-			std::vector<glm::vec2> vert2 = objects_[j].GetShape()->GetVertices();
-			for (glm::vec2& point : vert1)
-			{
-				point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-			}
-			for (glm::vec2& point : vert2)
-			{
-				point = objects_[j].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-			}
+	case BroadPhase::Type::Naive:
+		BroadPhaseNaive(potentialCollisions);
+		break;
+	case BroadPhase::Type::Grid:
+		BroadPhaseGrid(potentialCollisions);
+		break;
+	default:
+		break;
+	}
 
-			Manifold manifold = Collide(vert1, vert2);
-			if (manifold.bHit)
-			{
-				ResolveCollision(objects_[i], objects_[j], manifold);
-				collidedObjects[i] = true;
-				collidedObjects[j] = true;
-			}
+	std::vector<bool> collidedObjects(objects_.size());
+	for (const std::pair<size_t, size_t>& pair : potentialCollisions)
+	{
+		const size_t i = pair.first;
+		const size_t j = pair.second;
+		std::vector<glm::vec2> vert1 = objects_[i].GetShape()->GetVertices();
+		std::vector<glm::vec2> vert2 = objects_[j].GetShape()->GetVertices();
+		for (glm::vec2& point : vert1)
+		{
+			point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		for (glm::vec2& point : vert2)
+		{
+			point = objects_[j].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+
+		Manifold manifold = Collide(vert1, vert2);
+		if (manifold.bHit)
+		{
+			ResolveCollision(objects_[i], objects_[j], manifold);
+			collidedObjects[i] = true;
+			collidedObjects[j] = true;
 		}
 	}
 
@@ -414,6 +471,63 @@ void MainLayer::Step(float deltaTime)
 		else
 		{
 			objects_[i].GetShape()->SetColor(color2);
+		}
+	}
+}
+
+void MainLayer::BroadPhaseNaive(std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+{
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		for (size_t j = i + 1; j < objects_.size(); ++j)
+		{
+			outPotentialCollisions.emplace_back(i, j);
+		}
+	}
+}
+
+void MainLayer::BroadPhaseGrid(std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+{
+	std::unordered_map<glm::ivec2, std::vector<size_t> > grid;
+	grid.reserve(objects_.size());
+	std::vector<AABB> aabbs(objects_.size());
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		std::vector<glm::vec2> vert = objects_[i].GetShape()->GetVertices();
+		for (glm::vec2& point : vert)
+		{
+			point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		aabbs[i] = ComputeAABB(vert);
+
+		const glm::ivec2 cellMin = glm::floor(aabbs[i].Min / cellSize);
+		const glm::ivec2 cellMax = glm::floor(aabbs[i].Max / cellSize);
+		for (int x = cellMin.x; x <= cellMax.x; ++x)
+		{
+			for (int y = cellMin.y; y <= cellMax.y; ++y)
+			{
+				grid[glm::ivec2(x, y)].push_back(i);
+			}
+		}
+	}
+
+	std::unordered_set<uint64_t> checkedPairs;
+	checkedPairs.reserve(objects_.size());
+	outPotentialCollisions.reserve(objects_.size());
+	for (const std::pair<const glm::ivec2, std::vector<size_t> >& cell : grid)
+	{
+		for (size_t i = 0; i < cell.second.size(); ++i)
+		{
+			for (size_t j = i + 1; j < cell.second.size(); ++j)
+			{
+				size_t indexA = cell.second[i];
+				size_t indexB = cell.second[j];
+				uint64_t pairKey = (static_cast<uint64_t>(std::min(indexA, indexB)) << 32) | static_cast<uint64_t>(std::max(indexA, indexB));
+				if (checkedPairs.insert(pairKey).second)
+				{
+					outPotentialCollisions.emplace_back(indexA, indexB);
+				}
+			}
 		}
 	}
 }

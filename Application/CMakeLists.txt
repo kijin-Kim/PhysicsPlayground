@@ -10,3 +10,6 @@ add_executable(Application ${APPLICATION_SOURCE_FILES}
 
 target_link_libraries(Application PRIVATE CommonCore)
 target_include_directories(Application PRIVATE src)
+
+set(CONFIG_PATH "${CMAKE_CURRENT_SOURCE_DIR}/config/")
+target_compile_definitions(Application PRIVATE CONFIG_PATH="${CONFIG_PATH}")
