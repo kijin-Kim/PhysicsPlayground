@@ -22,6 +22,23 @@ struct QuadTreeNode
 	bool bIsDivided = false;
 };
 
+struct EndPoint
+{
+	float Value;
+	size_t ObjectIndex;
+	bool bIsMin; // true: min, false: max
+
+	bool operator<(const EndPoint& other) const
+	{
+		if (Value == other.Value)
+		{
+			// min이 max보다 먼저 오도록
+			return bIsMin && !other.bIsMin;
+		}
+		return Value < other.Value;
+	}
+};
+
 class MainLayer : public ILayer
 {
 public:

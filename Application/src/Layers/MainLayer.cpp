@@ -751,5 +751,52 @@ void MainLayer::BroadPhaseQuadtree(QuadTreeNode& outRoot, std::vector<std::pair<
 
 void MainLayer::BroadPhaseSAP(std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
 {
-	BroadPhaseNaive(outPotentialCollisions);
+	std::vector<AABB> aabbs(objects_.size());
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		std::vector<glm::vec2> vert = objects_[i].GetShape()->GetVertices();
+		for (glm::vec2& point : vert)
+		{
+			point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		aabbs[i] = ComputeAABB(vert);
+	}
+
+	std::vector<EndPoint> endpoints;
+	endpoints.reserve(objects_.size());
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		endpoints.push_back(EndPoint{aabbs[i].Min.x, i, true});
+		endpoints.push_back(EndPoint{aabbs[i].Max.x, i, false});
+	}
+
+	std::sort(endpoints.begin(), endpoints.end());
+	std::unordered_set<uint64_t> checked;
+	checked.reserve(objects_.size());
+	std::vector<size_t> activeList;
+	activeList.reserve(objects_.size());
+	for (const EndPoint& ep : endpoints)
+	{
+		if (ep.bIsMin)
+		{
+			for (size_t index : activeList)
+			{
+				uint64_t pairKey = MakePairKey(ep.ObjectIndex, index);
+				if (checked.insert(pairKey).second)
+				{
+					outPotentialCollisions.emplace_back(ep.ObjectIndex, index);
+				}
+			}
+			activeList.push_back(ep.ObjectIndex);
+		}
+		else
+		{
+			auto it = std::find(activeList.begin(), activeList.end(), ep.ObjectIndex);
+			if (it != activeList.end())
+			{
+				activeList.erase(it);
+			}
+		}
+	}
+
 }
