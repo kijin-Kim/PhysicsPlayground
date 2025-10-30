@@ -76,3 +76,13 @@ struct GridCellSizeChangedEvent : IEvent
 {
 	float NewCellSize;
 };
+
+struct QuadTreeMaxDepthChangedEvent : IEvent
+{
+	int NewMaxDepth;
+};
+
+struct QuadTreeMaxObjectsPerNodeChangedEvent : IEvent
+{
+	int NewMaxObjectsPerNode;
+};
