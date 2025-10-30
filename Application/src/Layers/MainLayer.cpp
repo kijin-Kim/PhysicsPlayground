@@ -1,4 +1,6 @@
 #include "MainLayer.h"
+#include <algorithm>
+
 
 #include "GLFW/glfw3.h"
 #include "Renderer/Shapes.h"
@@ -22,11 +24,6 @@ constexpr glm::vec4 color2 = glm::vec4(0.2f, 0.5f, 1.0f, 1.0f);
 constexpr glm::vec4 color3 = glm::vec4(0.5f, 0.2f, 0.2f, 1.0f);
 constexpr glm::vec4 color4 = glm::vec4(0.71f, 0.49f, 0.72f, 1.0f);
 
-struct AABB
-{
-	glm::vec2 Min;
-	glm::vec2 Max;
-};
 
 AABB ComputeAABB(const std::vector<glm::vec2>& points)
 {
@@ -43,8 +40,15 @@ AABB ComputeAABB(const std::vector<glm::vec2>& points)
 	return aabb;
 }
 
+void DrawAABB(Renderer& renderer, const AABB& aabb, const glm::vec4& color)
+{
+	glm::vec2 center = (aabb.Min + aabb.Max) * 0.5f;
+	glm::vec2 size = aabb.Max - aabb.Min;
+	renderer.DrawRectangle(center, 0.0f, size, color, true);
+}
 
-void NormalizeToCenteroid(std::vector<glm::vec2>& outPoints)
+
+void NormalizeToCentroid(std::vector<glm::vec2>& outPoints)
 {
 	glm::vec2 centroid(0.0f);
 	float area = 0.0f;
@@ -302,6 +306,7 @@ Manifold Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::ve
 	return manifold;
 }
 
+
 MainLayer::MainLayer(EventBus& eventBus)
 	: ILayer(eventBus)
 {
@@ -339,7 +344,7 @@ void MainLayer::OnInit()
 		glm::vec2(70.0f, 30.0f),
 		glm::vec2(100.0f, 20.0f),
 		glm::vec2(120.0f, 70.0f)};
-	NormalizeToCenteroid(polygonVertices);
+	NormalizeToCentroid(polygonVertices);
 
 	Object& o2 = objects_.emplace_back();
 	//o2.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
@@ -399,6 +404,13 @@ void MainLayer::OnRender(Renderer& renderer)
 	for (Object& object : objects_)
 	{
 		object.OnRender(renderer);
+		std::vector<glm::vec2> vert1 = object.GetShape()->GetVertices();
+		for (glm::vec2& point : vert1)
+		{
+			point = object.GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		AABB aabb = ComputeAABB(vert1);
+		DrawAABB(renderer, aabb, glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
 	}
 
 	if (broadPhaseAlgorithm_ == BroadPhase::Type::Grid)
@@ -411,6 +423,23 @@ void MainLayer::OnRender(Renderer& renderer)
 		{
 			renderer.DrawRectangle(glm::vec2(0.0f, y), 0.0f, glm::vec2(800.0f, 1.0f), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
 		}
+	}
+
+	if (broadPhaseAlgorithm_ == BroadPhase::Type::Quadtree)
+	{
+		std::function<void(QuadTreeNode&)> drawNode = [&](QuadTreeNode& node)
+		{
+			DrawAABB(renderer, node.Bounds, glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+			if (node.bIsDivided)
+			{
+				for (auto& child : node.Children)
+				{
+					drawNode(*child);
+				}
+			}
+		};
+
+		drawNode(rootNode_);
 	}
 
 	renderer.EndScene();
@@ -433,11 +462,18 @@ void MainLayer::Step(float deltaTime)
 	case BroadPhase::Type::Grid:
 		BroadPhaseGrid(potentialCollisions);
 		break;
+	case BroadPhase::Type::Quadtree:
+		BroadPhaseQuadtree(rootNode_, potentialCollisions);
+		break;
+	case BroadPhase::Type::SAP:
+		BroadPhaseSAP(potentialCollisions);
+		break;
 	default:
 		break;
 	}
 
 	std::vector<bool> collidedObjects(objects_.size());
+	std::cout << "Potential Collisions: " << potentialCollisions.size() << std::endl;
 	for (const std::pair<size_t, size_t>& pair : potentialCollisions)
 	{
 		const size_t i = pair.first;
@@ -486,6 +522,11 @@ void MainLayer::BroadPhaseNaive(std::vector<std::pair<size_t, size_t> >& outPote
 	}
 }
 
+uint64_t MakePairKey(size_t indexA, size_t indexB)
+{
+	return (static_cast<uint64_t>(std::min(indexA, indexB)) << 32) | static_cast<uint64_t>(std::max(indexA, indexB));
+}
+
 void MainLayer::BroadPhaseGrid(std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
 {
 	std::unordered_map<glm::ivec2, std::vector<size_t> > grid;
@@ -522,7 +563,7 @@ void MainLayer::BroadPhaseGrid(std::vector<std::pair<size_t, size_t> >& outPoten
 			{
 				size_t indexA = cell.second[i];
 				size_t indexB = cell.second[j];
-				uint64_t pairKey = (static_cast<uint64_t>(std::min(indexA, indexB)) << 32) | static_cast<uint64_t>(std::max(indexA, indexB));
+				uint64_t pairKey = MakePairKey(indexA, indexB);
 				if (checkedPairs.insert(pairKey).second)
 				{
 					outPotentialCollisions.emplace_back(indexA, indexB);
@@ -530,4 +571,185 @@ void MainLayer::BroadPhaseGrid(std::vector<std::pair<size_t, size_t> >& outPoten
 			}
 		}
 	}
+}
+
+bool AABBOverlap(const AABB& a, const AABB& b)
+{
+	return (a.Min.x <= b.Max.x && a.Max.x >= b.Min.x) &&
+		(a.Min.y <= b.Max.y && a.Max.y >= b.Min.y);
+}
+
+void Subdivide(QuadTreeNode& node)
+{
+	const glm::vec2 c = (node.Bounds.Min + node.Bounds.Max) * 0.5f;
+	auto createChildNode = [](const glm::vec2& min, const glm::vec2& max)
+	{
+		std::unique_ptr<QuadTreeNode> node = std::make_unique<QuadTreeNode>();
+		node->Bounds.Min = min;
+		node->Bounds.Max = max;
+		return node;
+	};
+	// 0: NE, 1: NW, 2: SW, 3: SE
+	node.Children[0] = createChildNode({c.x, c.y}, {node.Bounds.Max.x, node.Bounds.Max.y});
+	node.Children[1] = createChildNode({node.Bounds.Min.x, c.y}, {c.x, node.Bounds.Max.y});
+	node.Children[2] = createChildNode({node.Bounds.Min.x, node.Bounds.Min.y}, {c.x, c.y});
+	node.Children[3] = createChildNode({c.x, node.Bounds.Min.y}, {node.Bounds.Max.x, c.y});
+	node.bIsDivided = true;
+}
+
+bool AABBContains(const AABB& outer, const AABB& inner)
+{
+	return (inner.Min.x >= outer.Min.x && inner.Max.x <= outer.Max.x) &&
+		(inner.Min.y >= outer.Min.y && inner.Max.y <= outer.Max.y);
+}
+
+void InsertNode(QuadTreeNode& node, size_t objectIndex, const AABB& aabb, const std::vector<AABB>& allAABBs, int depth)
+{
+	constexpr int MAX_OBJECTS_PER_NODE = 2;
+	constexpr int MAX_DEPTH = 6;
+	if (!AABBOverlap(node.Bounds, aabb))
+	{
+		return;
+	}
+
+	if (node.bIsDivided)
+	{
+		for (size_t i = 0; i < 4; ++i)
+		{
+			if (AABBContains(node.Children[i]->Bounds, aabb))
+			{
+				InsertNode(*node.Children[i], objectIndex, aabb, allAABBs, depth + 1);
+				return;
+			}
+		}
+		node.ObjectIndices.push_back(objectIndex);
+		return;
+	}
+
+	node.ObjectIndices.push_back(objectIndex);
+	if (node.ObjectIndices.size() > MAX_OBJECTS_PER_NODE && depth < MAX_DEPTH)
+	{
+		Subdivide(node);
+		std::vector<size_t> remainings;
+		for (size_t index : node.ObjectIndices)
+		{
+			bool bInserted = false;
+			for (size_t i = 0; i < 4; ++i)
+			{
+				if (AABBContains(node.Children[i]->Bounds, allAABBs[index]))
+				{
+					InsertNode(*node.Children[i], index, allAABBs[index], allAABBs, depth + 1);
+					bInserted = true;
+					break;
+				}
+			}
+
+			if (!bInserted)
+			{
+				remainings.push_back(index);
+			}
+		}
+		node.ObjectIndices = remainings;
+	}
+
+}
+
+void CollectPotentialCollisions(const QuadTreeNode& node, const std::vector<AABB>& aabbs, std::vector<size_t>& boundaryObjects, std::unordered_set<uint64_t>& checked, std::vector<std::pair<size_t, size_t> >& outPairs)
+{
+	// 걸친 객체들과 노드 내부 객체들끼리 검사
+	for (size_t indexA : node.ObjectIndices)
+	{
+		const AABB& aabbA = aabbs[indexA];
+		for (size_t indexB : boundaryObjects)
+		{
+			const AABB& aabbB = aabbs[indexB];
+			if (!AABBOverlap(aabbA, aabbB))
+			{
+				continue;
+			}
+
+			uint64_t pairKey = MakePairKey(indexA, indexB);
+			if (checked.insert(pairKey).second)
+			{
+				outPairs.emplace_back(indexA, indexB);
+			}
+
+		}
+	}
+
+	// 노드 내부 객체들끼리 검사
+	const auto& indices = node.ObjectIndices;
+	for (size_t i = 0; i < indices.size(); ++i)
+	{
+		for (size_t j = i + 1; j < indices.size(); ++j)
+		{
+			size_t idA = indices[i];
+			size_t idB = indices[j];
+
+			uint64_t pairKey = MakePairKey(idA, idB);
+			if (checked.insert(pairKey).second)
+			{
+				outPairs.emplace_back(idA, idB);
+			}
+		}
+	}
+
+	if (!node.bIsDivided)
+	{
+		return;
+	}
+
+	// 자식 노드로 전달할 걸친 객체 목록 생성
+	boundaryObjects.insert(boundaryObjects.end(), node.ObjectIndices.begin(), node.ObjectIndices.end());
+
+	for (const auto& child : node.Children)
+	{
+		if (child)
+		{
+			CollectPotentialCollisions(*child, aabbs, boundaryObjects, checked, outPairs);
+		}
+	}
+}
+
+void MainLayer::BroadPhaseQuadtree(QuadTreeNode& outRoot, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+{
+	std::vector<AABB> aabbs(objects_.size());
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		std::vector<glm::vec2> vert = objects_[i].GetShape()->GetVertices();
+		for (glm::vec2& point : vert)
+		{
+			point = objects_[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		aabbs[i] = ComputeAABB(vert);
+	}
+
+	AABB worldAABB;
+	worldAABB.Min = glm::vec2(FLT_MAX);
+	worldAABB.Max = glm::vec2(-FLT_MAX);
+	for (const AABB& aabb : aabbs)
+	{
+		worldAABB.Min = glm::min(worldAABB.Min, aabb.Min);
+		worldAABB.Max = glm::max(worldAABB.Max, aabb.Max);
+	}
+	constexpr float PADDING = 10;
+	worldAABB.Min -= glm::vec2(PADDING);
+	worldAABB.Max += glm::vec2(PADDING);
+	outRoot = QuadTreeNode();
+	outRoot.Bounds = worldAABB;
+
+	for (size_t i = 0; i < objects_.size(); ++i)
+	{
+		InsertNode(outRoot, i, aabbs[i], aabbs, 0);
+	}
+
+	std::unordered_set<uint64_t> checked;
+	checked.reserve(objects_.size());
+	std::vector<size_t> boundaryObjects;
+	CollectPotentialCollisions(rootNode_, aabbs, boundaryObjects, checked, outPotentialCollisions);
+}
+
+void MainLayer::BroadPhaseSAP(std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+{
+	BroadPhaseNaive(outPotentialCollisions);
 }

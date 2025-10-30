@@ -54,7 +54,8 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	ImGui::NewFrame();
 
 	ImGui::Begin("Hello from ImGuiLayer");
-	ImGui::Text("FrameRate: %d", static_cast<int>(ImGui::GetIO().Framerate));
+	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate), 1000.0f / ImGui::GetIO().Framerate);
+
 	if (ImGui::Button("Pause/Resume", ImVec2(-1.0f, 0.0f)))
 	{
 		PauseUpdateEvent event;
@@ -69,7 +70,7 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 		eventBus_.Publish(event);
 	}
 
-	std::array<std::string, 2> broadPhaseAlgorithms = {};
+	std::array<std::string, static_cast<int>(BroadPhase::Type::NumTypes)> broadPhaseAlgorithms = {};
 	for (int i = 0; i < broadPhaseAlgorithms.size(); ++i)
 	{
 		broadPhaseAlgorithms[i] = BroadPhase::ToString(static_cast<BroadPhase::Type>(i));
@@ -104,8 +105,6 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 		event.NewCellSize = cellSize;
 		eventBus_.Publish(event);
 	}
-
-	ImGui::ShowDemoWindow();
 
 	ImGui::End();
 }

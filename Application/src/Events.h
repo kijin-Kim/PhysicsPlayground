@@ -14,13 +14,15 @@ struct StepEvent : IEvent
 	float DeltaTime;
 };
 
-
 namespace BroadPhase
 {
 	enum class Type
 	{
 		Naive = 0,
-		Grid
+		Grid,
+		Quadtree,
+		SAP,
+		NumTypes
 	};
 
 	inline const char* ToString(Type e)
@@ -31,6 +33,10 @@ namespace BroadPhase
 			return "Naive";
 		case Type::Grid:
 			return "Grid";
+		case Type::Quadtree:
+			return "Quadtree";
+		case Type::SAP:
+			return "SAP";
 		default:
 			return "unknown";
 		}
@@ -46,6 +52,16 @@ namespace BroadPhase
 		if (str == "Grid")
 		{
 			return Type::Grid;
+		}
+
+		if (str == "Quadtree")
+		{
+			return Type::Quadtree;
+		}
+
+		if (str == "SAP")
+		{
+			return Type::SAP;
 		}
 	}
 }
