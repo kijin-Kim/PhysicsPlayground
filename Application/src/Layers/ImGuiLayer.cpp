@@ -66,6 +66,7 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	ImGui::SeparatorText("Options");
 	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate), 1000.0f / ImGui::GetIO().Framerate);
 
+
 	EventBus& eventBus = EventBus::GetInstance();
 	if (ImGui::Button("Pause/Resume", ImVec2(-1.0f, 0.0f)))
 	{

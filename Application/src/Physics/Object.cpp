@@ -15,7 +15,7 @@ Object::Object()
 
 void Object::OnUpdate(float deltaTime)
 {
-	rigidBody_.Integrate(deltaTime, position_);
+	rigidBody_.Integrate(deltaTime, position_, rotation_);
 	transform_ = glm::translate(glm::mat4(1.0f), glm::vec3(position_, 0.0f));
 	transform_ = glm::rotate(transform_, rotation_, glm::vec3(0.0f, 0.0f, 1.0f));
 }

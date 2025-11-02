@@ -38,6 +38,27 @@ void NormalizeToCentroid(std::vector<glm::vec2>& outPoints)
 	}
 }
 
+float ComputePolygonInertia(const std::vector<glm::vec2>& vertices, float mass)
+{
+	float area = 0.0f;
+	float inertia = 0.0f;
+	float Ix = 0.0f;
+	float Iy = 0.0f;
+
+	for (size_t i = 0; i < vertices.size(); ++i)
+	{
+		size_t j = (i + 1) % vertices.size();
+		glm::vec2 p0 = vertices[i];
+		glm::vec2 p1 = vertices[j];
+		float cross = p0.x * p1.y - p1.x * p0.y;
+		area += cross * 0.5f;
+		Ix += (p0.y * p0.y + p0.y * p1.y + p1.y * p1.y) * cross;
+		Iy += (p0.x * p0.x + p0.x * p1.x + p1.x * p1.x) * cross;
+	}
+	inertia = (Ix + Iy) / 12.0f * (mass / area);
+	return inertia;
+}
+
 MainLayer::MainLayer()
 	: bShouldPauseUpdate(false)
 	, cellSize(100.0f)
@@ -136,12 +157,23 @@ void MainLayer::OnInit()
 	for (int i = 0; i < 30; ++i)
 	{
 		Object& circleObj = objects_.emplace_back();
-		circleObj.SetShape(std::make_unique<CircleShape>(15.0f));
+		circleObj.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 50.0f)));
 		circleObj.GetShape()->SetColor(color2);
-		circleObj.GetRigidbody().SetMass(1.0f);
+		circleObj.GetRigidbody().SetMass(100.0f);
 		float x = static_cast<float>(rand() % 700 - 350);
 		float y = static_cast<float>(rand() % 500 - 250);
 		circleObj.SetPosition(glm::vec2(x, y));
+	}
+
+	for (Object& obj : objects_)
+	{
+		std::vector<glm::vec2> vert = obj.GetShape()->GetVertices();
+		for (glm::vec2& point : vert)
+		{
+			point = obj.GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+		}
+		float inertia = ComputePolygonInertia(vert, 1.0f / obj.GetRigidbody().GetInvMass());
+		obj.GetRigidbody().SetInertia(inertia);
 	}
 }
 

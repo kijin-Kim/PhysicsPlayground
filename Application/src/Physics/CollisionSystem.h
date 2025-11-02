@@ -22,10 +22,17 @@ class CollisionSystem
 public:
 	struct Edge
 	{
-		int Start;
-		int End;
+		int StartIndex;
+		int EndIndex;
 		glm::vec2 Normal;
 		float Distance;
+	};
+
+	struct SupportPoint
+	{
+		glm::vec2 MinkowskiPoint;
+		glm::vec2 PointA;
+		glm::vec2 PointB;
 	};
 
 	struct Manifold
@@ -33,7 +40,9 @@ public:
 		bool bHit;
 		glm::vec2 Normal;
 		float Penetration;
+		glm::vec2 ContactPoint;
 	};
+
 
 	void Update(std::vector<Object>& objects, float deltaTime);
 	void SetBroadPhaseAlgorithm(std::unique_ptr<IBroadPhase> broadPhase);
@@ -41,12 +50,12 @@ public:
 
 private:
 	void ResolveCollision(Object& obj1, Object& obj2, const Manifold& manifold);
-	Edge FindClosestEdge(const std::vector<glm::vec2>& simplex);
+	Edge FindClosestEdge(const std::vector<SupportPoint>& simplex);
 	glm::vec2 Furthest(const std::vector<glm::vec2>& vertices, const glm::vec2& dir);
-	glm::vec2 Support(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, const glm::vec2& dir);
-	bool DoSimplex(std::vector<glm::vec2>& outSimplex, glm::vec2& direction);
-	Manifold EPA(const std::vector<glm::vec2>& simplex, const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2);
-	bool GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<glm::vec2>& outSimplex);
+	SupportPoint Support(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, const glm::vec2& dir);
+	bool DoSimplex(std::vector<SupportPoint>& outSimplex, glm::vec2& direction);
+	Manifold EPA(const std::vector<SupportPoint>& simplex, const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2);
+	bool GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<SupportPoint>& outSimplex);
 	Manifold Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2);
 
 private:

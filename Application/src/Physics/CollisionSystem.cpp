@@ -1,7 +1,13 @@
 #include "CollisionSystem.h"
 #include <iostream>
+#include <mutex>
+#include <span>
+#include <thread>
+
 #include "Object.h"
 #include "BroadPhase/BroadPhase.h"
+
+#include "Core/JobSystem.h"
 
 
 void CollisionSystem::Update(std::vector<Object>& objects, float deltaTime)
@@ -17,43 +23,57 @@ void CollisionSystem::Update(std::vector<Object>& objects, float deltaTime)
 		broadPhase_->ComputePotentialCollisions(objects, potentialCollisions);
 	}
 
-	std::vector<bool> collidedObjects(objects.size());
-	std::cout << "Potential Collisions: " << potentialCollisions.size() << std::endl;
+	struct CollisionTask
+	{
+		size_t ObjectIndex1;
+		size_t ObjectIndex2;
+		Manifold Manifold;
+	};
+
+	std::vector<CollisionTask> collisionTasks;
+	std::mutex collisionTasksMutex;
+
+	JobSystem jobSystem;
+	jobSystem.Prepare(potentialCollisions.size());
 	for (const std::pair<size_t, size_t>& pair : potentialCollisions)
 	{
-		const size_t i = pair.first;
-		const size_t j = pair.second;
-		std::vector<glm::vec2> vert1 = objects[i].GetShape()->GetVertices();
-		std::vector<glm::vec2> vert2 = objects[j].GetShape()->GetVertices();
-		for (glm::vec2& point : vert1)
+		jobSystem.Enqueue([&, pair]()
 		{
-			point = objects[i].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-		}
-		for (glm::vec2& point : vert2)
-		{
-			point = objects[j].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-		}
+			const size_t objectIndex1 = pair.first;
+			const size_t objectIndex2 = pair.second;
+			std::vector<glm::vec2> vert1 = objects[objectIndex1].GetShape()->GetVertices();
+			std::vector<glm::vec2> vert2 = objects[objectIndex2].GetShape()->GetVertices();
+			for (glm::vec2& point : vert1)
+			{
+				point = objects[objectIndex1].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+			}
+			for (glm::vec2& point : vert2)
+			{
+				point = objects[objectIndex2].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+			}
 
-		Manifold manifold = Collide(vert1, vert2);
-		if (manifold.bHit)
-		{
-			ResolveCollision(objects[i], objects[j], manifold);
-			collidedObjects[i] = true;
-			collidedObjects[j] = true;
-		}
+			Manifold manifold = Collide(vert1, vert2);
+			if (manifold.bHit)
+			{
+				std::lock_guard<std::mutex> lock(collisionTasksMutex);
+				collisionTasks.emplace_back(objectIndex1, objectIndex2, manifold);
+			}
+		});
 	}
+	jobSystem.WaitAll();
 
-	for (size_t i = 0; i < objects.size(); ++i)
+	for (Object& object : objects)
 	{
-		if (collidedObjects[i])
-		{
-			objects[i].GetShape()->SetColor(color3);
-		}
-		else
-		{
-			objects[i].GetShape()->SetColor(color2);
-		}
+		object.GetShape()->SetColor(color2);
 	}
+
+	for (const CollisionTask& ct : collisionTasks)
+	{
+		ResolveCollision(objects[ct.ObjectIndex1], objects[ct.ObjectIndex2], ct.Manifold);
+		objects[ct.ObjectIndex1].GetShape()->SetColor(color1);
+		objects[ct.ObjectIndex2].GetShape()->SetColor(color1);
+	}
+
 }
 
 void CollisionSystem::SetBroadPhaseAlgorithm(std::unique_ptr<IBroadPhase> broadPhase)
@@ -100,9 +120,8 @@ void CollisionSystem::ResolveCollision(Object& obj1, Object& obj2, const Manifol
 	const float e = 1.0f; // 반발 계수
 	const float j = -(1.0f + e) * velocityAlongNormal / totalInvMass;
 	const glm::vec2 impulse = j * manifold.Normal;
-
-	body1.ApplyImpulse(-impulse);
-	body2.ApplyImpulse(impulse);
+	body1.ApplyImpulse(-impulse, obj1.GetPosition(), manifold.ContactPoint);
+	body2.ApplyImpulse(impulse, obj2.GetPosition(), manifold.ContactPoint);
 
 	// Positional correction
 	const float percent = 0.8f; // 보정 비율 (0~1)
@@ -121,7 +140,7 @@ void CollisionSystem::ResolveCollision(Object& obj1, Object& obj2, const Manifol
 	}
 }
 
-CollisionSystem::Edge CollisionSystem::FindClosestEdge(const std::vector<glm::vec2>& simplex)
+CollisionSystem::Edge CollisionSystem::FindClosestEdge(const std::vector<SupportPoint>& simplex)
 {
 	Edge closestEdge;
 	closestEdge.Distance = FLT_MAX;
@@ -129,8 +148,8 @@ CollisionSystem::Edge CollisionSystem::FindClosestEdge(const std::vector<glm::ve
 	for (size_t i = 0; i < simplex.size(); ++i)
 	{
 		size_t j = (i + 1) % simplex.size();
-		glm::vec2 a = simplex[i];
-		glm::vec2 b = simplex[j];
+		glm::vec2 a = simplex[i].MinkowskiPoint;
+		glm::vec2 b = simplex[j].MinkowskiPoint;
 		glm::vec2 edge = b - a;
 		glm::vec2 normal = glm::normalize(glm::vec2(-edge.y, edge.x));
 		if (glm::dot(normal, a) < 0)
@@ -142,8 +161,8 @@ CollisionSystem::Edge CollisionSystem::FindClosestEdge(const std::vector<glm::ve
 
 		if (distance < closestEdge.Distance)
 		{
-			closestEdge.Start = static_cast<int>(i);
-			closestEdge.End = static_cast<int>(j);
+			closestEdge.StartIndex = static_cast<int>(i);
+			closestEdge.EndIndex = static_cast<int>(j);
 			closestEdge.Normal = normal;
 			closestEdge.Distance = distance;
 		}
@@ -170,20 +189,20 @@ glm::vec2 CollisionSystem::Furthest(const std::vector<glm::vec2>& vertices, cons
 	return supportPoint;
 }
 
-glm::vec2 CollisionSystem::Support(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, const glm::vec2& dir)
+CollisionSystem::SupportPoint CollisionSystem::Support(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, const glm::vec2& dir)
 {
 	const glm::vec2 point1 = Furthest(verts1, dir);
 	const glm::vec2 point2 = Furthest(verts2, -dir);
-	return point1 - point2;
+	return SupportPoint{point1 - point2, point1, point2};
 }
 
-bool CollisionSystem::DoSimplex(std::vector<glm::vec2>& outSimplex, glm::vec2& direction)
+bool CollisionSystem::DoSimplex(std::vector<SupportPoint>& outSimplex, glm::vec2& direction)
 {
 	if (outSimplex.size() == 2)
 	{
 		// 선분 AB를 기준으로 어느쪽에 원점이 있는지 판단
-		glm::vec2 a = outSimplex[1];
-		glm::vec2 b = outSimplex[0];
+		glm::vec2 a = outSimplex[1].MinkowskiPoint;
+		glm::vec2 b = outSimplex[0].MinkowskiPoint;
 		glm::vec2 ab = b - a;
 		glm::vec2 ao = -a;
 
@@ -195,9 +214,9 @@ bool CollisionSystem::DoSimplex(std::vector<glm::vec2>& outSimplex, glm::vec2& d
 	}
 	else if (outSimplex.size() == 3)
 	{
-		glm::vec2 a = outSimplex[2];
-		glm::vec2 b = outSimplex[1];
-		glm::vec2 c = outSimplex[0];
+		glm::vec2 a = outSimplex[2].MinkowskiPoint;
+		glm::vec2 b = outSimplex[1].MinkowskiPoint;
+		glm::vec2 c = outSimplex[0].MinkowskiPoint;
 
 		glm::vec2 ab = b - a;
 		glm::vec2 ac = c - a;
@@ -235,25 +254,34 @@ bool CollisionSystem::DoSimplex(std::vector<glm::vec2>& outSimplex, glm::vec2& d
 	return false;
 }
 
-CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<glm::vec2>& simplex, const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
+CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<SupportPoint>& simplex, const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
 {
-	std::vector<glm::vec2> polytope = simplex;
+	std::vector<SupportPoint> polytope = simplex;
 
 	for (int iteration = 0; iteration < 100; ++iteration)
 	{
 		Edge edge = FindClosestEdge(polytope);
-		glm::vec2 supportPoint = Support(verts1, verts2, edge.Normal);
-		float distance = glm::dot(supportPoint, edge.Normal);
-
+		const SupportPoint supportPoint = Support(verts1, verts2, edge.Normal);
+		const float distance = glm::dot(supportPoint.MinkowskiPoint, edge.Normal);
 		if (distance - edge.Distance < 0.001f)
 		{
 			Manifold manifold;
 			manifold.bHit = true;
 			manifold.Normal = edge.Normal;
 			manifold.Penetration = distance;
+
+			const SupportPoint& s1 = polytope[edge.StartIndex];
+			const SupportPoint& s2 = polytope[edge.EndIndex];
+			glm::vec2 ab = s2.MinkowskiPoint - s1.MinkowskiPoint;
+			float t = glm::dot(-s1.MinkowskiPoint, ab) / glm::dot(ab, ab);
+			t = glm::clamp(t, 0.0f, 1.0f);
+
+			glm::vec2 contactPointA = s1.PointA + t * (s2.PointA - s1.PointA);
+			glm::vec2 contactPointB = s1.PointB + t * (s2.PointB - s1.PointB);
+			manifold.ContactPoint = 0.5f * (contactPointA + contactPointB);
 			return manifold;
 		}
-		polytope.insert(polytope.begin() + edge.End, supportPoint);
+		polytope.insert(polytope.begin() + edge.EndIndex, supportPoint);
 	}
 
 	Manifold noHit;
@@ -261,16 +289,16 @@ CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<glm::vec2>& sim
 	return noHit;
 }
 
-bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<glm::vec2>& outSimplex)
+bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<SupportPoint>& outSimplex)
 {
 	glm::vec2 direction(1.0f, 0.0f);
-	glm::vec2 supportPoint = Support(verts1, verts2, direction);
+	SupportPoint supportPoint = Support(verts1, verts2, direction);
 	outSimplex.push_back(supportPoint);
-	direction = -supportPoint;
+	direction = -supportPoint.MinkowskiPoint;
 	for (int i = 0; i < 100; ++i)
 	{
 		supportPoint = Support(verts1, verts2, direction);
-		if (glm::dot(supportPoint, direction) <= 0)
+		if (glm::dot(supportPoint.MinkowskiPoint, direction) <= 0)
 		{
 			return false;
 		}
@@ -286,7 +314,7 @@ bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vecto
 
 CollisionSystem::Manifold CollisionSystem::Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
 {
-	std::vector<glm::vec2> simplex;
+	std::vector<SupportPoint> simplex;
 	Manifold manifold;
 	manifold.bHit = false;
 	if (!GJK(verts1, verts2, simplex))
