@@ -1,14 +1,12 @@
 #pragma once
 #include <vector>
 
-
 #include "Events.h"
 
 #include "Core/Layers/Layer.h"
 
 #include "Physics/CollisionSystem.h"
 #include "Physics/Object.h"
-
 
 class IBroadPhase;
 
@@ -17,7 +15,6 @@ class MainLayer : public ILayer
 public:
 	MainLayer();
 	virtual ~MainLayer();
-
 
 	virtual void OnInit() override;
 	virtual void OnUpdate(float deltaTime) override;

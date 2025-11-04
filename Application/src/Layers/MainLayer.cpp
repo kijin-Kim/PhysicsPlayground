@@ -1,18 +1,18 @@
 #include "MainLayer.h"
 
-
 #include "Renderer/Shapes.h"
 
 #include "Physics/Object.h"
 #include "Renderer/Renderer.h"
 
-
 #include "Core/EventBus.h"
 #include "GLM/gtx/hash.hpp"
 
-#include "Physics/CollisionSystem.h"
 #include "Physics/BroadPhase/BroadPhase.h"
+#include "Physics/CollisionSystem.h"
 
+#include "tracy/Tracy.hpp"
+#include "tracy/TracyOpenGL.hpp"
 
 void NormalizeToCentroid(std::vector<glm::vec2>& outPoints)
 {
@@ -65,37 +65,32 @@ MainLayer::MainLayer()
 {
 	EventBus& eventBus = EventBus::GetInstance();
 
-	subscribedEvents_.push_back(eventBus.Subscribe<PauseUpdateEvent>([this](const PauseUpdateEvent& e)
-	{
-		bShouldPauseUpdate = e.bPaused;
-	}));
+	subscribedEvents_.push_back(
+		eventBus.Subscribe<PauseUpdateEvent>([this](const PauseUpdateEvent& e) { bShouldPauseUpdate = e.bPaused; }));
 
-	subscribedEvents_.push_back(eventBus.Subscribe<StepEvent>([this](const StepEvent& e)
-	{
-		Step(e.DeltaTime);
-	}));
+	subscribedEvents_.push_back(eventBus.Subscribe<StepEvent>([this](const StepEvent& e) { Step(e.DeltaTime); }));
 
-	subscribedEvents_.push_back(eventBus.Subscribe<ChangeBroadPhaseAlgorithmEvent>([this](const ChangeBroadPhaseAlgorithmEvent& e)
-	{
-		switch (e.NewAlgorithm)
+	subscribedEvents_.push_back(eventBus.Subscribe<ChangeBroadPhaseAlgorithmEvent>(
+		[this](const ChangeBroadPhaseAlgorithmEvent& e)
 		{
-		case BroadPhase::Type::Naive:
-			collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<NaiveBroadPhase>());
-			break;
-		case BroadPhase::Type::Grid:
-			collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<GridBroadPhase>());
-			break;
-		case BroadPhase::Type::Quadtree:
-			collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<QuadTreeBroadPhase>());
-			break;
-		case BroadPhase::Type::SAP:
-			collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<SAPBroadPhase>());
-			break;
-		default:
-			break;
-		}
-	}));
-
+			switch (e.NewAlgorithm)
+			{
+			case BroadPhase::Type::Naive:
+				collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<NaiveBroadPhase>());
+				break;
+			case BroadPhase::Type::Grid:
+				collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<GridBroadPhase>());
+				break;
+			case BroadPhase::Type::Quadtree:
+				collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<QuadTreeBroadPhase>());
+				break;
+			case BroadPhase::Type::SAP:
+				collisionSystem_.SetBroadPhaseAlgorithm(std::make_unique<SAPBroadPhase>());
+				break;
+			default:
+				break;
+			}
+		}));
 }
 
 MainLayer::~MainLayer()
@@ -106,50 +101,45 @@ MainLayer::~MainLayer()
 	}
 }
 
-
 void MainLayer::OnInit()
 {
 	Object& o1 = objects_.emplace_back();
 	o1.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
-	o1.GetShape()->SetColor(color1);
+	o1.GetShape()->SetColor(OceanBlue);
 	o1.GetRigidbody().SetMass(0.0f);
 	o1.SetPosition(glm::vec2(-30.0f, -30.0f));
 
-	std::vector<glm::vec2> polygonVertices = {
-		glm::vec2(50.0f, 70.0f),
-		glm::vec2(70.0f, 30.0f),
-		glm::vec2(100.0f, 20.0f),
-		glm::vec2(120.0f, 70.0f)};
+	std::vector<glm::vec2> polygonVertices
+		= {glm::vec2(50.0f, 70.0f), glm::vec2(70.0f, 30.0f), glm::vec2(100.0f, 20.0f), glm::vec2(120.0f, 70.0f)};
 	NormalizeToCentroid(polygonVertices);
 
 	Object& o2 = objects_.emplace_back();
-	//o2.SetShape(std::make_unique<RectangleShape>(glm::vec2(100.0f, 100.0f)));
 	o2.SetShape(std::make_unique<ConvexShape>(polygonVertices));
-	o2.GetShape()->SetColor(color4);
+	o2.GetShape()->SetColor(OceanBlue);
 	o2.GetRigidbody().SetMass(1.0f);
 	o2.SetPosition(glm::vec2(30.0f, 80.0f));
 
 	Object& floor = objects_.emplace_back();
 	floor.SetShape(std::make_unique<RectangleShape>(glm::vec2(800.0f, 50.0f)));
-	floor.GetShape()->SetColor(color1);
+	floor.GetShape()->SetColor(OceanBlue);
 	floor.GetRigidbody().SetMass(0.0f);
 	floor.SetPosition(glm::vec2(0.0f, -300.0f));
 
 	Object& leftWall = objects_.emplace_back();
 	leftWall.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 600.0f)));
-	leftWall.GetShape()->SetColor(color1);
+	leftWall.GetShape()->SetColor(OceanBlue);
 	leftWall.GetRigidbody().SetMass(0.0f);
 	leftWall.SetPosition(glm::vec2(-400.0f, 0.0f));
 
 	Object& rightWall = objects_.emplace_back();
 	rightWall.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 600.0f)));
-	rightWall.GetShape()->SetColor(color1);
+	rightWall.GetShape()->SetColor(OceanBlue);
 	rightWall.GetRigidbody().SetMass(0.0f);
 	rightWall.SetPosition(glm::vec2(400.0f, 0.0f));
 
 	Object& ceiling = objects_.emplace_back();
 	ceiling.SetShape(std::make_unique<RectangleShape>(glm::vec2(800.0f, 50.0f)));
-	ceiling.GetShape()->SetColor(color1);
+	ceiling.GetShape()->SetColor(OceanBlue);
 	ceiling.GetRigidbody().SetMass(0.0f);
 	ceiling.SetPosition(glm::vec2(0.0f, 300.0f));
 
@@ -158,7 +148,7 @@ void MainLayer::OnInit()
 	{
 		Object& circleObj = objects_.emplace_back();
 		circleObj.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 50.0f)));
-		circleObj.GetShape()->SetColor(color2);
+		circleObj.GetShape()->SetColor(OceanBlue);
 		circleObj.GetRigidbody().SetMass(100.0f);
 		float x = static_cast<float>(rand() % 700 - 350);
 		float y = static_cast<float>(rand() % 500 - 250);
@@ -172,13 +162,14 @@ void MainLayer::OnInit()
 		{
 			point = obj.GetTransform() * glm::vec4(point, 0.0f, 1.0f);
 		}
-		float inertia = ComputePolygonInertia(vert, 1.0f / obj.GetRigidbody().GetInvMass());
+		float inertia = ComputePolygonInertia(vert, obj.GetRigidbody().GetMass());
 		obj.GetRigidbody().SetInertia(inertia);
 	}
 }
 
 void MainLayer::OnUpdate(float deltaTime)
 {
+	ZoneScoped;
 	if (!bShouldPauseUpdate)
 	{
 		Step(deltaTime);
@@ -187,19 +178,18 @@ void MainLayer::OnUpdate(float deltaTime)
 
 void MainLayer::OnRender(Renderer& renderer)
 {
+	TracyGpuZone("MainLayer::OnRender");
 	renderer.BeginScene();
-
 	for (Object& object : objects_)
 	{
 		object.OnRender(renderer);
 	}
 	collisionSystem_.DrawDebug(objects_, renderer);
-
 	renderer.EndScene();
-
 }
 
 void MainLayer::Step(float deltaTime)
 {
+	ZoneScoped;
 	collisionSystem_.Update(objects_, deltaTime);
 }

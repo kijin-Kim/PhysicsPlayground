@@ -15,6 +15,7 @@
 #include <filesystem>
 
 #include "Core/IniParser.h"
+
 void ImGuiLayer::OnInit()
 {
 	IMGUI_CHECKVERSION();
@@ -64,8 +65,8 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	ImGui::Begin("Hello from ImGuiLayer");
 
 	ImGui::SeparatorText("Options");
-	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate), 1000.0f / ImGui::GetIO().Framerate);
-
+	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate),
+				1000.0f / ImGui::GetIO().Framerate);
 
 	EventBus& eventBus = EventBus::GetInstance();
 	if (ImGui::Button("Pause/Resume", ImVec2(-1.0f, 0.0f)))

@@ -1,9 +1,8 @@
 #pragma once
-#include <memory>
-#include <glm/glm.hpp>
-#include "Rigidbody.h"
 #include "Renderer/Shapes.h"
-
+#include "Rigidbody.h"
+#include <glm/glm.hpp>
+#include <memory>
 
 class Renderer;
 
@@ -14,6 +13,7 @@ public:
 	void OnUpdate(float deltaTime);
 
 	Rigidbody& GetRigidbody() { return rigidBody_; }
+	const Rigidbody& GetRigidbody() const { return rigidBody_; }
 	void SetPosition(const glm::vec2& position) { position_ = position; }
 	glm::vec2 GetPosition() const { return position_; }
 	void SetRotation(float rotation) { rotation_ = rotation; }

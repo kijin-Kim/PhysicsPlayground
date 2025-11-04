@@ -22,14 +22,12 @@ AABB::AABB(const glm::vec2& min, const glm::vec2& max)
 
 bool AABB::Overlaps(const AABB& other) const
 {
-	return (Min.x <= other.Max.x && Max.x >= other.Min.x) &&
-		(Min.y <= other.Max.y && Max.y >= other.Min.y);
+	return (Min.x <= other.Max.x && Max.x >= other.Min.x) && (Min.y <= other.Max.y && Max.y >= other.Min.y);
 }
 
 bool AABB::Contains(const AABB& other) const
 {
-	return (other.Min.x >= Min.x && other.Max.x <= Max.x) &&
-		(other.Min.y >= Min.y && other.Max.y <= Max.y);
+	return (other.Min.x >= Min.x && other.Max.x <= Max.x) && (other.Min.y >= Min.y && other.Max.y <= Max.y);
 }
 
 void AABB::Draw(Renderer& renderer, const glm::vec4& color) const

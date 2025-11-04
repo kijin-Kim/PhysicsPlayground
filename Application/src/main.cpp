@@ -2,9 +2,12 @@
 #include "Layers/ImGuiLayer.h"
 #include "Layers/MainLayer.h"
 
+#include "common/TracySystem.hpp"
+
 int main()
 {
-	Application app( 1920, 1080);
+	tracy::SetThreadName("Main Thread");
+	Application app(1920, 1080);
 	app.AddLayer<MainLayer>();
 	app.AddLayer<ImGuiLayer>();
 	app.Run();

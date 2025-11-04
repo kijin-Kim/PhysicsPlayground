@@ -4,24 +4,40 @@
 #include <span>
 #include <thread>
 
-#include "Object.h"
 #include "BroadPhase/BroadPhase.h"
+#include "Object.h"
 
-#include "Core/JobSystem.h"
+#include "glm/gtx/exterior_product.hpp"
+#include "tracy/Tracy.hpp"
+#include "tracy/TracyC.h"
 
-
-void CollisionSystem::Update(std::vector<Object>& objects, float deltaTime)
+void CollisionSystem::IntegrateForces(std::vector<Object>& objects, float deltaTime)
 {
 	for (Object& object : objects)
 	{
-		object.OnUpdate(deltaTime);
+		if (!object.GetRigidbody().IsSleeping() && !object.GetRigidbody().IsStatic())
+		{
+			object.GetRigidbody().IntegrateForce(deltaTime);
+		}
 	}
+}
 
-	std::vector<std::pair<size_t, size_t> > potentialCollisions;
+void CollisionSystem::CollisionDetectAndResolve(std::vector<Object>& objects)
+{
+	std::vector<std::pair<size_t, size_t>> potentialCollisions;
 	if (broadPhase_)
 	{
+		ZoneScopedN("BroadPhase");
 		broadPhase_->ComputePotentialCollisions(objects, potentialCollisions);
 	}
+
+	std::erase_if(potentialCollisions,
+				  [&objects](const std::pair<size_t, size_t>& pair)
+				  {
+					  const Rigidbody& body1 = objects[pair.first].GetRigidbody();
+					  const Rigidbody& body2 = objects[pair.second].GetRigidbody();
+					  return (body1.IsSleeping() && body2.IsSleeping()) || (body1.IsStatic() && body2.IsStatic());
+				  });
 
 	struct CollisionTask
 	{
@@ -33,47 +49,103 @@ void CollisionSystem::Update(std::vector<Object>& objects, float deltaTime)
 	std::vector<CollisionTask> collisionTasks;
 	std::mutex collisionTasksMutex;
 
-	JobSystem jobSystem;
-	jobSystem.Prepare(potentialCollisions.size());
-	for (const std::pair<size_t, size_t>& pair : potentialCollisions)
+	jobSystem_.Prepare(potentialCollisions.size());
 	{
-		jobSystem.Enqueue([&, pair]()
+		ZoneScopedN("NarrowPhase");
+		for (const std::pair<size_t, size_t>& pair : potentialCollisions)
 		{
-			const size_t objectIndex1 = pair.first;
-			const size_t objectIndex2 = pair.second;
-			std::vector<glm::vec2> vert1 = objects[objectIndex1].GetShape()->GetVertices();
-			std::vector<glm::vec2> vert2 = objects[objectIndex2].GetShape()->GetVertices();
-			for (glm::vec2& point : vert1)
-			{
-				point = objects[objectIndex1].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-			}
-			for (glm::vec2& point : vert2)
-			{
-				point = objects[objectIndex2].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
-			}
-
-			Manifold manifold = Collide(vert1, vert2);
-			if (manifold.bHit)
-			{
-				std::lock_guard<std::mutex> lock(collisionTasksMutex);
-				collisionTasks.emplace_back(objectIndex1, objectIndex2, manifold);
-			}
-		});
+			jobSystem_.Enqueue(
+				[&, pair]()
+				{
+					const size_t objectIndex1 = pair.first;
+					const size_t objectIndex2 = pair.second;
+					std::vector<glm::vec2> vert1 = objects[objectIndex1].GetShape()->GetVertices();
+					std::vector<glm::vec2> vert2 = objects[objectIndex2].GetShape()->GetVertices();
+					for (glm::vec2& point : vert1)
+					{
+						point = objects[objectIndex1].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+					}
+					for (glm::vec2& point : vert2)
+					{
+						point = objects[objectIndex2].GetTransform() * glm::vec4(point, 0.0f, 1.0f);
+					}
+					Manifold manifold = Collide(vert1, vert2);
+					if (manifold.bHit)
+					{
+						std::lock_guard<std::mutex> lock(collisionTasksMutex);
+						collisionTasks.emplace_back(objectIndex1, objectIndex2, manifold);
+					}
+				});
+		}
+		jobSystem_.WaitAll();
 	}
-	jobSystem.WaitAll();
+
+	{
+		ZoneScopedN("ResolveCollisions");
+		for (const CollisionTask& ct : collisionTasks)
+		{
+			ResolveCollision(objects[ct.ObjectIndex1], objects[ct.ObjectIndex2], ct.Manifold);
+		}
+	}
+}
+
+void CollisionSystem::ApplyDamping(std::vector<Object>& objects, float deltaTime)
+{
+	for (Object& object : objects)
+	{
+		if (!object.GetRigidbody().IsSleeping() && !object.GetRigidbody().IsStatic())
+		{
+			object.GetRigidbody().ApplyDamping(deltaTime);
+		}
+	}
+}
+void CollisionSystem::IntegrateVelocities(std::vector<Object>& objects, float deltaTime)
+{
+	for (Object& object : objects)
+	{
+		if (!object.GetRigidbody().IsSleeping() && !object.GetRigidbody().IsStatic())
+		{
+			glm::vec2 position = object.GetPosition();
+			float rotation = object.GetRotation();
+			object.GetRigidbody().IntegrateVelocity(deltaTime, position, rotation);
+			object.SetPosition(position);
+			object.SetRotation(rotation);
+		}
+	}
+}
+void CollisionSystem::TrySleepOrWake(std::vector<Object>& objects, float deltaTime)
+{
+	for (Object& object : objects)
+	{
+		object.GetRigidbody().TrySleepOrWake(deltaTime);
+	}
+}
+
+void CollisionSystem::Update(std::vector<Object>& objects, float deltaTime)
+{
+	ZoneScoped;
+	for (Object& object : objects)
+	{
+		object.OnUpdate(deltaTime);
+	}
+
+	IntegrateForces(objects, deltaTime);
+	CollisionDetectAndResolve(objects);
+	ApplyDamping(objects, deltaTime);
+	IntegrateVelocities(objects, deltaTime);
+	TrySleepOrWake(objects, deltaTime);
 
 	for (Object& object : objects)
 	{
-		object.GetShape()->SetColor(color2);
+		if (object.GetRigidbody().IsSleeping())
+		{
+			object.GetShape()->SetColor(LavenderPurple);
+		}
+		else
+		{
+			object.GetShape()->SetColor(OceanBlue);
+		}
 	}
-
-	for (const CollisionTask& ct : collisionTasks)
-	{
-		ResolveCollision(objects[ct.ObjectIndex1], objects[ct.ObjectIndex2], ct.Manifold);
-		objects[ct.ObjectIndex1].GetShape()->SetColor(color1);
-		objects[ct.ObjectIndex2].GetShape()->SetColor(color1);
-	}
-
 }
 
 void CollisionSystem::SetBroadPhaseAlgorithm(std::unique_ptr<IBroadPhase> broadPhase)
@@ -110,22 +182,59 @@ void CollisionSystem::ResolveCollision(Object& obj1, Object& obj2, const Manifol
 		return;
 	}
 
-	const glm::vec2 relativeVelocity = body2.GetVelocity() - body1.GetVelocity();
+	const glm::vec2 r1 = manifold.ContactPoint - obj1.GetPosition();
+	const glm::vec2 r2 = manifold.ContactPoint - obj2.GetPosition();
+	glm::vec2 velocity1
+		= body1.GetVelocity() + glm::vec2(-body1.GetAngularVelocity() * r1.y, body1.GetAngularVelocity() * r1.x);
+	glm::vec2 velocity2
+		= body2.GetVelocity() + glm::vec2(-body2.GetAngularVelocity() * r2.y, body2.GetAngularVelocity() * r2.x);
+	glm::vec2 relativeVelocity = velocity2 - velocity1;
 	const float velocityAlongNormal = glm::dot(relativeVelocity, manifold.Normal);
-	if (velocityAlongNormal > 0)
+	if (velocityAlongNormal > 0.0f)
 	{
 		return;
 	}
 
-	const float e = 1.0f; // 반발 계수
-	const float j = -(1.0f + e) * velocityAlongNormal / totalInvMass;
-	const glm::vec2 impulse = j * manifold.Normal;
+	float e = glm::max(body1.GetElasticity(), body2.GetElasticity());
+	constexpr float RESTITUTION_THRESHOLD = 0.5f;
+	if (glm::abs(velocityAlongNormal) < RESTITUTION_THRESHOLD)
+	{
+		e = 0.0f;
+	}
+
+	const float angN1 = glm::cross(r1, manifold.Normal);
+	const float angN2 = glm::cross(r2, manifold.Normal);
+	float denomN = totalInvMass + angN1 * angN1 * body1.GetInvInertia() + angN2 * angN2 * body2.GetInvInertia();
+	denomN = denomN > 0.0f ? denomN : 1e-8f;
+	const float jn = -(1.0f + e) * velocityAlongNormal / denomN;
+	const glm::vec2 impulse = jn * manifold.Normal;
 	body1.ApplyImpulse(-impulse, obj1.GetPosition(), manifold.ContactPoint);
 	body2.ApplyImpulse(impulse, obj2.GetPosition(), manifold.ContactPoint);
 
+	glm::vec2 tangent = glm::vec2(-manifold.Normal.y, manifold.Normal.x);
+	if (glm::dot(tangent, relativeVelocity) < 0)
+	{
+		tangent = -tangent;
+	}
+
+	velocity1 = body1.GetVelocity() + glm::vec2(-body1.GetAngularVelocity() * r1.y, body1.GetAngularVelocity() * r1.x);
+	velocity2 = body2.GetVelocity() + glm::vec2(-body2.GetAngularVelocity() * r2.y, body2.GetAngularVelocity() * r2.x);
+	relativeVelocity = velocity2 - velocity1;
+	const float angT1 = glm::cross(r1, tangent);
+	const float angT2 = glm::cross(r2, tangent);
+	float denomT = totalInvMass + angT1 * angT1 * body1.GetInvInertia() + angT2 * angT2 * body2.GetInvInertia();
+	denomT = denomT > 0.0f ? denomT : 1e-8f;
+
+	float jt = -glm::dot(relativeVelocity, tangent) / denomT;
+	const float maxFriction = glm::sqrt(body1.GetFriction() * body2.GetFriction()) * jn;
+	jt = glm::clamp(jt, -maxFriction, maxFriction);
+	const glm::vec2 frictionImpulse = jt * tangent;
+	body1.ApplyImpulse(-frictionImpulse, obj1.GetPosition(), manifold.ContactPoint);
+	body2.ApplyImpulse(frictionImpulse, obj2.GetPosition(), manifold.ContactPoint);
+
 	// Positional correction
 	const float percent = 0.8f; // 보정 비율 (0~1)
-	const float slop = 0.01f;   // 허용 오차
+	const float slop = 0.01f;	// 허용 오차
 	const float totalSeparation = std::max(manifold.Penetration - slop, 0.0f) * percent;
 	glm::vec2 correction = totalSeparation / totalInvMass * manifold.Normal;
 
@@ -189,7 +298,8 @@ glm::vec2 CollisionSystem::Furthest(const std::vector<glm::vec2>& vertices, cons
 	return supportPoint;
 }
 
-CollisionSystem::SupportPoint CollisionSystem::Support(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, const glm::vec2& dir)
+CollisionSystem::SupportPoint CollisionSystem::Support(const std::vector<glm::vec2>& verts1,
+													   const std::vector<glm::vec2>& verts2, const glm::vec2& dir)
 {
 	const glm::vec2 point1 = Furthest(verts1, dir);
 	const glm::vec2 point2 = Furthest(verts2, -dir);
@@ -254,7 +364,9 @@ bool CollisionSystem::DoSimplex(std::vector<SupportPoint>& outSimplex, glm::vec2
 	return false;
 }
 
-CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<SupportPoint>& simplex, const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
+CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<SupportPoint>& simplex,
+											   const std::vector<glm::vec2>& verts1,
+											   const std::vector<glm::vec2>& verts2)
 {
 	std::vector<SupportPoint> polytope = simplex;
 
@@ -289,7 +401,8 @@ CollisionSystem::Manifold CollisionSystem::EPA(const std::vector<SupportPoint>& 
 	return noHit;
 }
 
-bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2, std::vector<SupportPoint>& outSimplex)
+bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2,
+						  std::vector<SupportPoint>& outSimplex)
 {
 	glm::vec2 direction(1.0f, 0.0f);
 	SupportPoint supportPoint = Support(verts1, verts2, direction);
@@ -312,7 +425,8 @@ bool CollisionSystem::GJK(const std::vector<glm::vec2>& verts1, const std::vecto
 	return false;
 }
 
-CollisionSystem::Manifold CollisionSystem::Collide(const std::vector<glm::vec2>& verts1, const std::vector<glm::vec2>& verts2)
+CollisionSystem::Manifold CollisionSystem::Collide(const std::vector<glm::vec2>& verts1,
+												   const std::vector<glm::vec2>& verts2)
 {
 	std::vector<SupportPoint> simplex;
 	Manifold manifold;
