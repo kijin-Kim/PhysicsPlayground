@@ -8,31 +8,31 @@
 #include "Physics/Object.h"
 #include "Physics/Shapes/AABB.h"
 
-
 class EventBus;
 
 class IBroadPhase
 {
 public:
 	virtual ~IBroadPhase() = default;
-	virtual void ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions) = 0;
+	virtual void ComputePotentialCollisions(const std::vector<Object>& objects,
+											std::vector<std::pair<size_t, size_t>>& outPotentialCollisions)
+		= 0;
 
-	virtual void DrawDebug(Renderer& renderer)
-	{
-	}
-
-	uint64_t MakePairKey(size_t indexA, size_t indexB)
-	{
-		return (static_cast<uint64_t>(std::min(indexA, indexB)) << 32) | static_cast<uint64_t>(std::max(indexA, indexB));
-	}
+	virtual void DrawDebug(Renderer& renderer) {}
 
 protected:
+	uint64_t MakePairKey(size_t indexA, size_t indexB)
+	{
+		return (static_cast<uint64_t>(std::min(indexA, indexB)) << 32)
+			   | static_cast<uint64_t>(std::max(indexA, indexB));
+	}
 };
 
 class NaiveBroadPhase : public IBroadPhase
 {
 public:
-	virtual void ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions) override;
+	virtual void ComputePotentialCollisions(const std::vector<Object>& objects,
+											std::vector<std::pair<size_t, size_t>>& outPotentialCollisions) override;
 };
 
 class GridBroadPhase : public IBroadPhase
@@ -40,14 +40,19 @@ class GridBroadPhase : public IBroadPhase
 public:
 	GridBroadPhase();
 	virtual ~GridBroadPhase();
-	virtual void ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions) override;
+	virtual void ComputePotentialCollisions(const std::vector<Object>& objects,
+											std::vector<std::pair<size_t, size_t>>& outPotentialCollisions) override;
 	virtual void DrawDebug(Renderer& renderer) override;
 
 private:
-	float cellSize = 100.0f;
+	float cellSize;
 	std::vector<EventBus::EventHandle> subscribedEvents_;
-};
 
+	// only for debug drawing
+	glm::vec2 gridMin_;
+	glm::vec2 gridMax_;
+
+};
 
 class QuadTreeBroadPhase : public IBroadPhase
 {
@@ -59,15 +64,20 @@ public:
 		std::array<std::unique_ptr<QuadTreeNode>, 4> Children;
 		bool bIsDivided = false;
 	};
+
 	QuadTreeBroadPhase();
 	virtual ~QuadTreeBroadPhase();
-	virtual void ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions) override;
+	virtual void ComputePotentialCollisions(const std::vector<Object>& objects,
+											std::vector<std::pair<size_t, size_t>>& outPotentialCollisions) override;
 	virtual void DrawDebug(Renderer& renderer) override;
 
 private:
-	void InsertNode(QuadTreeNode& node, size_t objectIndex, const AABB& aabb, const std::vector<AABB>& allAABBs, int depth);
+	void InsertNode(QuadTreeNode& node, size_t objectIndex, const AABB& aabb, const std::vector<AABB>& allAABBs,
+					int depth);
 	void Subdivide(QuadTreeNode& node);
-	void CollectPotentialCollisions(const QuadTreeNode& node, const std::vector<AABB>& aabbs, std::vector<size_t>& boundaryObjects, std::unordered_set<uint64_t>& checked, std::vector<std::pair<size_t, size_t> >& outPairs);
+	void CollectPotentialCollisions(const QuadTreeNode& node, const std::vector<AABB>& aabbs,
+									std::vector<size_t>& boundaryObjects, std::unordered_set<uint64_t>& checked,
+									std::vector<std::pair<size_t, size_t>>& outPairs);
 	void DrawNodeRecursive(Renderer& renderer, QuadTreeNode& node);
 
 private:
@@ -96,6 +106,8 @@ public:
 			return Value < other.Value;
 		}
 	};
+
 	SAPBroadPhase();
-	virtual void ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions) override;
+	virtual void ComputePotentialCollisions(const std::vector<Object>& objects,
+											std::vector<std::pair<size_t, size_t>>& outPotentialCollisions) override;
 };

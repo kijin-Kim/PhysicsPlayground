@@ -3,7 +3,6 @@
 
 #include "Core/EventBus.h"
 
-
 struct PauseUpdateEvent : IEvent
 {
 	bool bPaused;
@@ -16,56 +15,55 @@ struct StepEvent : IEvent
 
 namespace BroadPhase
 {
-	enum class Type
+enum class Type
+{
+	Naive = 0,
+	Grid,
+	Quadtree,
+	SAP,
+	NumTypes
+};
+
+inline const char* ToString(Type e)
+{
+	switch (e)
 	{
-		Naive = 0,
-		Grid,
-		Quadtree,
-		SAP,
-		NumTypes
-	};
-
-	inline const char* ToString(Type e)
-	{
-		switch (e)
-		{
-		case Type::Naive:
-			return "Naive";
-		case Type::Grid:
-			return "Grid";
-		case Type::Quadtree:
-			return "Quadtree";
-		case Type::SAP:
-			return "SAP";
-		default:
-			return "unknown";
-		}
-	}
-
-	inline Type FromString(const std::string& str)
-	{
-		if (str == "Naive")
-		{
-			return Type::Naive;
-		}
-
-		if (str == "Grid")
-		{
-			return Type::Grid;
-		}
-
-		if (str == "Quadtree")
-		{
-			return Type::Quadtree;
-		}
-
-		if (str == "SAP")
-		{
-			return Type::SAP;
-		}
+	case Type::Naive:
+		return "Naive";
+	case Type::Grid:
+		return "Grid";
+	case Type::Quadtree:
+		return "Quadtree";
+	case Type::SAP:
+		return "SAP";
+	default:
+		return "unknown";
 	}
 }
 
+inline Type FromString(const std::string& str)
+{
+	if (str == "Naive")
+	{
+		return Type::Naive;
+	}
+
+	if (str == "Grid")
+	{
+		return Type::Grid;
+	}
+
+	if (str == "Quadtree")
+	{
+		return Type::Quadtree;
+	}
+
+	if (str == "SAP")
+	{
+		return Type::SAP;
+	}
+}
+} // namespace BroadPhase
 
 struct ChangeBroadPhaseAlgorithmEvent : IEvent
 {
@@ -85,4 +83,18 @@ struct QuadTreeMaxDepthChangedEvent : IEvent
 struct QuadTreeMaxObjectsPerNodeChangedEvent : IEvent
 {
 	int NewMaxObjectsPerNode;
+};
+
+struct DrawDebugAABBsEvent : IEvent
+{
+	bool bEnabled;
+};
+
+struct DrawDebugBroadPhaseEvent : IEvent
+{
+	bool bEnabled;
+};
+
+struct RestartEvent : IEvent
+{
 };

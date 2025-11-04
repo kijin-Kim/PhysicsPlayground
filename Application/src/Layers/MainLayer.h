@@ -1,14 +1,12 @@
 #pragma once
 #include <vector>
 
-
 #include "Events.h"
 
 #include "Core/Layers/Layer.h"
 
 #include "Physics/CollisionSystem.h"
 #include "Physics/Object.h"
-
 
 class IBroadPhase;
 
@@ -17,7 +15,7 @@ class MainLayer : public ILayer
 public:
 	MainLayer();
 	virtual ~MainLayer();
-
+	void Restart();
 
 	virtual void OnInit() override;
 	virtual void OnUpdate(float deltaTime) override;
@@ -34,4 +32,5 @@ private:
 	// 이하 변수는 ini 파일에 의해 런타임에 덮어씌어짐
 	bool bShouldPauseUpdate;
 	float cellSize;
+	float accumulatedTime;
 };

@@ -15,6 +15,7 @@
 #include <filesystem>
 
 #include "Core/IniParser.h"
+
 void ImGuiLayer::OnInit()
 {
 	IMGUI_CHECKVERSION();
@@ -30,7 +31,7 @@ void ImGuiLayer::OnInit()
 	EventBus& eventBus = EventBus::GetInstance();
 
 	PauseUpdateEvent pauseEvent;
-	bShouldPauseUpdate_ = configFile.GetBool("Options", "Paused", false);
+	bShouldPauseUpdate_ = configFile.GetBool("Options", "Paused", bShouldPauseUpdate_);
 	pauseEvent.bPaused = bShouldPauseUpdate_;
 	eventBus.Publish(pauseEvent);
 
@@ -39,19 +40,29 @@ void ImGuiLayer::OnInit()
 	changeAlgorithmEvent.NewAlgorithm = currentBroadPhaseType_;
 	eventBus.Publish(changeAlgorithmEvent);
 
+	DrawDebugAABBsEvent drawAABBEvent;
+	bDrawDebugAABBs_ = configFile.GetBool("Options", "DrawDebugAABB", bDrawDebugAABBs_);
+	drawAABBEvent.bEnabled = bDrawDebugAABBs_;
+	eventBus.Publish(drawAABBEvent);
+
+	DrawDebugBroadPhaseEvent drawBroadPhaseEvent;
+	bDrawDebugBroadPhase_ = configFile.GetBool("Options", "DrawDebugBroadPhase", bDrawDebugBroadPhase_);
+	drawBroadPhaseEvent.bEnabled = bDrawDebugBroadPhase_;
+	eventBus.Publish(drawBroadPhaseEvent);
+
 	GridCellSizeChangedEvent cellSizeChangedEvent;
-	currentGridCellSize_ = configFile.GetFloat("GridSettings", "GridCellSize", 0.0f);
-	cellSizeChangedEvent.NewCellSize = currentGridCellSize_;
+	gridCellSize_ = configFile.GetFloat("GridSettings", "GridCellSize", gridCellSize_);
+	cellSizeChangedEvent.NewCellSize = gridCellSize_;
 	eventBus.Publish(cellSizeChangedEvent);
 
 	QuadTreeMaxObjectsPerNodeChangedEvent maxObjectsEvent;
-	currentQuadTreeMaxObjectsPerNode_ = configFile.GetInt("QuadTreeSettings", "MaxObjectsPerNode", 2);
-	maxObjectsEvent.NewMaxObjectsPerNode = currentQuadTreeMaxObjectsPerNode_;
+	quadTreeMaxObjectsPerNode_ = configFile.GetInt("QuadTreeSettings", "MaxObjectsPerNode", quadTreeMaxObjectsPerNode_);
+	maxObjectsEvent.NewMaxObjectsPerNode = quadTreeMaxObjectsPerNode_;
 	eventBus.Publish(maxObjectsEvent);
 
 	QuadTreeMaxDepthChangedEvent maxDepthEvent;
-	currentQuadTreeMaxDepth_ = configFile.GetInt("QuadTreeSettings", "MaxDepth", 6);
-	maxDepthEvent.NewMaxDepth = currentQuadTreeMaxDepth_;
+	quadTreeMaxDepth_ = configFile.GetInt("QuadTreeSettings", "MaxDepth", quadTreeMaxDepth_);
+	maxDepthEvent.NewMaxDepth = quadTreeMaxDepth_;
 	eventBus.Publish(maxDepthEvent);
 }
 
@@ -64,10 +75,16 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	ImGui::Begin("Hello from ImGuiLayer");
 
 	ImGui::SeparatorText("Options");
-	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate), 1000.0f / ImGui::GetIO().Framerate);
-
+	ImGui::Text("FrameRate: %d (%.0f ms)", static_cast<int>(ImGui::GetIO().Framerate),
+				1000.0f / ImGui::GetIO().Framerate);
 
 	EventBus& eventBus = EventBus::GetInstance();
+	if (ImGui::Button("Restart", ImVec2(-1.0f, 0.0f)))
+	{
+		RestartEvent event;
+		eventBus.Publish(event);
+	}
+
 	if (ImGui::Button("Pause/Resume", ImVec2(-1.0f, 0.0f)))
 	{
 		PauseUpdateEvent event;
@@ -79,6 +96,22 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	{
 		StepEvent event;
 		event.DeltaTime = deltaTime;
+		eventBus.Publish(event);
+	}
+
+	if (ImGui::Button("Draw AABBs", ImVec2(-1.0f, 0.0f)))
+	{
+		DrawDebugAABBsEvent event;
+		bDrawDebugAABBs_ = !bDrawDebugAABBs_;
+		event.bEnabled = bDrawDebugAABBs_;
+		eventBus.Publish(event);
+	}
+
+	if (ImGui::Button("Draw Broad Phase", ImVec2(-1.0f, 0.0f)))
+	{
+		DrawDebugBroadPhaseEvent event;
+		bDrawDebugBroadPhase_ = !bDrawDebugBroadPhase_;
+		event.bEnabled = bDrawDebugBroadPhase_;
 		eventBus.Publish(event);
 	}
 
@@ -117,11 +150,11 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 		break;
 	case BroadPhase::Type::Grid:
 	{
-		static float gridCellSize = currentGridCellSize_;
+		static float gridCellSize = gridCellSize_;
 		if (ImGui::SliderFloat("Grid Cell Size", &gridCellSize, 8.0f, 128.0f))
 		{
 			GridCellSizeChangedEvent event;
-			currentGridCellSize_ = gridCellSize;
+			gridCellSize_ = gridCellSize;
 			event.NewCellSize = gridCellSize;
 			eventBus.Publish(event);
 		}
@@ -129,11 +162,11 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 	}
 	case BroadPhase::Type::Quadtree:
 	{
-		static int quadTreeMaxObjectsPerNode = currentQuadTreeMaxObjectsPerNode_;
-		static int quadTreeMaxDepth = currentQuadTreeMaxDepth_;
+		static int quadTreeMaxObjectsPerNode = quadTreeMaxObjectsPerNode_;
+		static int quadTreeMaxDepth = quadTreeMaxDepth_;
 		if (ImGui::SliderInt("QuadTree Max Objects Per Node", &quadTreeMaxObjectsPerNode, 1, 10))
 		{
-			currentQuadTreeMaxObjectsPerNode_ = quadTreeMaxObjectsPerNode;
+			quadTreeMaxObjectsPerNode_ = quadTreeMaxObjectsPerNode;
 			// You can publish an event here if needed
 			QuadTreeMaxObjectsPerNodeChangedEvent event;
 			event.NewMaxObjectsPerNode = quadTreeMaxObjectsPerNode;
@@ -141,7 +174,7 @@ void ImGuiLayer::OnUpdate(float deltaTime)
 		}
 		if (ImGui::SliderInt("QuadTree Max Depth", &quadTreeMaxDepth, 1, 10))
 		{
-			currentQuadTreeMaxDepth_ = quadTreeMaxDepth;
+			quadTreeMaxDepth_ = quadTreeMaxDepth;
 			QuadTreeMaxDepthChangedEvent event;
 			event.NewMaxDepth = quadTreeMaxDepth;
 			eventBus.Publish(event);

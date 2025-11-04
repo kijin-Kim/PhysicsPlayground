@@ -3,7 +3,6 @@
 
 #include "Core/Layers/Layer.h"
 
-
 class ImGuiLayer : public ILayer
 {
 public:
@@ -14,14 +13,14 @@ public:
 
 private:
 	bool bShouldPauseUpdate_ = false;
-	BroadPhase::Type currentBroadPhaseType_;
-
+	BroadPhase::Type currentBroadPhaseType_ = BroadPhase::Type::Naive;
+	bool bDrawDebugAABBs_ = false;
+	bool bDrawDebugBroadPhase_ = false;
 
 	// Grid Broad Phase 설정
-	float currentGridCellSize_;
+	float gridCellSize_ = 64.0f;
 
 	// QuadTree Broad Phase 설정
-	int currentQuadTreeMaxDepth_ = 6;
-	int currentQuadTreeMaxObjectsPerNode_ = 2;
-
+	int quadTreeMaxDepth_ = 6;
+	int quadTreeMaxObjectsPerNode_ = 2;
 };

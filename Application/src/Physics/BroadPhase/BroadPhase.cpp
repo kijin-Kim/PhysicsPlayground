@@ -1,17 +1,24 @@
 #include "BroadPhase.h"
 
+#include "Colors.h"
+
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "Events.h"
 
-#include "Physics/Shapes/AABB.h"
 #include "GLM/gtx/hash.hpp"
+#include "Physics/Shapes/AABB.h"
 
+#include "tracy/Tracy.hpp"
 
-void NaiveBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+#include <ranges>
+
+void NaiveBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects,
+												 std::vector<std::pair<size_t, size_t>>& outPotentialCollisions)
 {
+	ZoneScoped;
 	for (size_t i = 0; i < objects.size(); ++i)
 	{
 		for (size_t j = i + 1; j < objects.size(); ++j)
@@ -22,12 +29,13 @@ void NaiveBroadPhase::ComputePotentialCollisions(const std::vector<Object>& obje
 }
 
 GridBroadPhase::GridBroadPhase()
+	: cellSize(64.0f)
+	, gridMin_(FLT_MAX)
+	, gridMax_(-FLT_MAX)
 {
 	EventBus& eventBus = EventBus::GetInstance();
 	subscribedEvents_.push_back(eventBus.Subscribe<GridCellSizeChangedEvent>([this](const GridCellSizeChangedEvent& e)
-	{
-		cellSize = e.NewCellSize;
-	}));
+																			 { cellSize = e.NewCellSize; }));
 }
 
 GridBroadPhase::~GridBroadPhase()
@@ -39,9 +47,11 @@ GridBroadPhase::~GridBroadPhase()
 	}
 }
 
-void GridBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+void GridBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects,
+												std::vector<std::pair<size_t, size_t>>& outPotentialCollisions)
 {
-	std::unordered_map<glm::ivec2, std::vector<size_t> > grid;
+	ZoneScoped;
+	std::unordered_map<glm::ivec2, std::vector<size_t>> grid;
 	grid.reserve(objects.size());
 	std::vector<AABB> aabbs(objects.size());
 	for (size_t i = 0; i < objects.size(); ++i)
@@ -64,10 +74,18 @@ void GridBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objec
 		}
 	}
 
+	gridMin_ = glm::vec2(FLT_MAX);
+	gridMax_ = glm::vec2(-FLT_MAX);
+	for (const glm::ivec2& cell : grid | std::views::keys)
+	{
+		gridMin_ = glm::min(gridMin_, glm::vec2(cell) * cellSize);
+		gridMax_ = glm::max(gridMax_, (glm::vec2(cell) + glm::vec2(1.0f)) * cellSize);
+	}
+
 	std::unordered_set<uint64_t> checkedPairs;
 	checkedPairs.reserve(objects.size());
 	outPotentialCollisions.reserve(objects.size());
-	for (const std::pair<const glm::ivec2, std::vector<size_t> >& cell : grid)
+	for (const std::pair<const glm::ivec2, std::vector<size_t>>& cell : grid)
 	{
 		for (size_t i = 0; i < cell.second.size(); ++i)
 		{
@@ -87,28 +105,25 @@ void GridBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objec
 
 void GridBroadPhase::DrawDebug(Renderer& renderer)
 {
-	for (float x = -400.0f; x <= 400.0f; x += cellSize)
+	for (float x = gridMin_.x; x <= gridMax_.x; x += cellSize)
 	{
-		renderer.DrawRectangle(glm::vec2(x, 0.0f), 0.0f, glm::vec2(1.0f, 600.0f), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+		renderer.DrawRectangle( {x, (gridMin_.y + gridMax_.y) * 0.5f}, 0.0f,
+							 {0.1f, gridMax_.y - gridMin_.y}, PColor::Grey* glm::vec4(1.0f, 1.0f, 1.0f, 0.5f), true);
 	}
-	for (float y = -300.0f; y <= 300.0f; y += cellSize)
+	for (float y = gridMin_.y; y <= gridMax_.y; y += cellSize)
 	{
-		renderer.DrawRectangle(glm::vec2(0.0f, y), 0.0f, glm::vec2(800.0f, 1.0f), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
+		renderer.DrawRectangle( {(gridMin_.x + gridMax_.x) * 0.5f, y}, 0.0f,
+							 {gridMax_.x - gridMin_.x, 0.1f}, PColor::Grey * glm::vec4(1.0f, 1.0f, 1.0f, 0.5f), true);
 	}
-
 }
 
 QuadTreeBroadPhase::QuadTreeBroadPhase()
 {
 	EventBus& eventBus = EventBus::GetInstance();
-	subscribedEvents_.push_back(eventBus.Subscribe<QuadTreeMaxObjectsPerNodeChangedEvent>([this](const QuadTreeMaxObjectsPerNodeChangedEvent& e)
-	{
-		maxObjectsPerNode_ = e.NewMaxObjectsPerNode;
-	}));
-	subscribedEvents_.push_back(eventBus.Subscribe<QuadTreeMaxDepthChangedEvent>([this](const QuadTreeMaxDepthChangedEvent& e)
-	{
-		maxDepth_ = e.NewMaxDepth;
-	}));
+	subscribedEvents_.push_back(eventBus.Subscribe<QuadTreeMaxObjectsPerNodeChangedEvent>(
+		[this](const QuadTreeMaxObjectsPerNodeChangedEvent& e) { maxObjectsPerNode_ = e.NewMaxObjectsPerNode; }));
+	subscribedEvents_.push_back(eventBus.Subscribe<QuadTreeMaxDepthChangedEvent>(
+		[this](const QuadTreeMaxDepthChangedEvent& e) { maxDepth_ = e.NewMaxDepth; }));
 }
 
 QuadTreeBroadPhase::~QuadTreeBroadPhase()
@@ -119,8 +134,10 @@ QuadTreeBroadPhase::~QuadTreeBroadPhase()
 	}
 }
 
-void QuadTreeBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
+void QuadTreeBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects,
+													std::vector<std::pair<size_t, size_t>>& outPotentialCollisions)
 {
+	ZoneScoped;
 	std::vector<AABB> aabbs(objects.size());
 	for (size_t i = 0; i < objects.size(); ++i)
 	{
@@ -162,7 +179,8 @@ void QuadTreeBroadPhase::DrawDebug(Renderer& renderer)
 	DrawNodeRecursive(renderer, rootNode_);
 }
 
-void QuadTreeBroadPhase::InsertNode(QuadTreeNode& node, size_t objectIndex, const AABB& aabb, const std::vector<AABB>& allAABBs, int depth)
+void QuadTreeBroadPhase::InsertNode(QuadTreeNode& node, size_t objectIndex, const AABB& aabb,
+									const std::vector<AABB>& allAABBs, int depth)
 {
 	if (!node.Bounds.Overlaps(aabb))
 	{
@@ -208,7 +226,6 @@ void QuadTreeBroadPhase::InsertNode(QuadTreeNode& node, size_t objectIndex, cons
 		}
 		node.ObjectIndices = remainings;
 	}
-
 }
 
 void QuadTreeBroadPhase::Subdivide(QuadTreeNode& node)
@@ -229,7 +246,10 @@ void QuadTreeBroadPhase::Subdivide(QuadTreeNode& node)
 	node.bIsDivided = true;
 }
 
-void QuadTreeBroadPhase::CollectPotentialCollisions(const QuadTreeNode& node, const std::vector<AABB>& aabbs, std::vector<size_t>& boundaryObjects, std::unordered_set<uint64_t>& checked, std::vector<std::pair<size_t, size_t> >& outPairs)
+void QuadTreeBroadPhase::CollectPotentialCollisions(const QuadTreeNode& node, const std::vector<AABB>& aabbs,
+													std::vector<size_t>& boundaryObjects,
+													std::unordered_set<uint64_t>& checked,
+													std::vector<std::pair<size_t, size_t>>& outPairs)
 {
 	// 걸친 객체들과 노드 내부 객체들끼리 검사
 	for (size_t indexA : node.ObjectIndices)
@@ -248,7 +268,6 @@ void QuadTreeBroadPhase::CollectPotentialCollisions(const QuadTreeNode& node, co
 			{
 				outPairs.emplace_back(indexA, indexB);
 			}
-
 		}
 	}
 
@@ -298,15 +317,12 @@ void QuadTreeBroadPhase::DrawNodeRecursive(Renderer& renderer, QuadTreeNode& nod
 	}
 }
 
-SAPBroadPhase::SAPBroadPhase()
+SAPBroadPhase::SAPBroadPhase() {}
 
+void SAPBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects,
+											   std::vector<std::pair<size_t, size_t>>& outPotentialCollisions)
 {
-
-}
-
-void SAPBroadPhase::ComputePotentialCollisions(const std::vector<Object>& objects, std::vector<std::pair<size_t, size_t> >& outPotentialCollisions)
-{
-
+	ZoneScoped;
 	std::vector<AABB> aabbs(objects.size());
 	for (size_t i = 0; i < objects.size(); ++i)
 	{
@@ -354,5 +370,4 @@ void SAPBroadPhase::ComputePotentialCollisions(const std::vector<Object>& object
 			}
 		}
 	}
-
 }

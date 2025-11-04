@@ -1,8 +1,6 @@
 #pragma once
-#include <vector>
 #include "Renderer/Renderer.h"
-
-
+#include <vector>
 
 struct AABB
 {

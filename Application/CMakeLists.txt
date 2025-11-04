@@ -12,7 +12,8 @@ add_executable(Application ${APPLICATION_SOURCE_FILES}
         src/Physics/Shapes/AABB.cpp
         src/Physics/Shapes/AABB.h
         src/Physics/CollisionSystem.cpp
-        src/Physics/CollisionSystem.h)
+        src/Physics/CollisionSystem.h
+        src/Colors.h)
 
 target_link_libraries(Application PRIVATE CommonCore)
 target_include_directories(Application PRIVATE src)
