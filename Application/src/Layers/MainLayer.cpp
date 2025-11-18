@@ -154,7 +154,7 @@ void MainLayer::Restart()
 	ceiling.GetRigidbody().SetMass(0.0f);
 	ceiling.SetPosition(glm::vec2(0.0f, maxBounds.y));
 
-	for (int i = 0; i < 200; ++i)
+	for (int i = 0; i < 100; ++i)
 	{
 		Object& obj = objects_.emplace_back();
 		obj.SetShape(std::make_unique<RectangleShape>(glm::vec2(50.0f, 50.0f)));

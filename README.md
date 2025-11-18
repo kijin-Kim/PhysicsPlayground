@@ -2,6 +2,10 @@
 
 2D 물리 엔진 시뮬레이션 및 시각화 프로젝트입니다. C++와 OpenGL을 사용하여 구현되었으며, 다양한 Broad Phase 충돌 감지 알고리즘을 비교할 수 있습니다.
 
+
+https://github.com/user-attachments/assets/dc23c410-6a8c-4f6d-8d23-3dafdf34c83a
+
+
 ## 주요 기능
 
 ### 물리 시뮬레이션
@@ -99,11 +103,6 @@ MaxDepth=6
 ```
 
 ## 아키텍처 특징
-
-### 이벤트 기반 시스템
-- EventBus를 통한 느슨한 결합
-- UI와 물리 시스템 간 통신
-- 런타임 설정 변경 지원
 
 ### 물리 파이프라인
 1. **Force Integration** (힘 적분)
