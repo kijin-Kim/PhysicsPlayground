@@ -15,6 +15,8 @@
 #include "tracy/Tracy.hpp"
 #include "tracy/TracyOpenGL.hpp"
 
+namespace
+{
 void NormalizeToCentroid(std::vector<glm::vec2>& outPoints)
 {
 	glm::vec2 centroid(0.0f);
@@ -38,6 +40,7 @@ void NormalizeToCentroid(std::vector<glm::vec2>& outPoints)
 		point -= centroid;
 	}
 }
+} // namespace
 
 float ComputePolygonInertia(const std::vector<glm::vec2>& vertices, float mass)
 {
@@ -161,6 +164,7 @@ void MainLayer::Restart()
 		float y = rand() % static_cast<int>(extents.y * 0.5f) - extents.y * 0.5f * 0.5f;
 		obj.SetPosition(glm::vec2(x, y));
 	}
+
 
 	for (Object& obj : objects_)
 	{
